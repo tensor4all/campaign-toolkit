@@ -1,0 +1,321 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tensor4all.example/schemas/campaign.schema.json",
+  "title": "Campaign Descriptor",
+  "description": "Everything a campaign-specific about running the shared toolkit: its measured project, its recorded identities, its declarations, its engine names and how its published pages and reports are named. The toolkit reads this file and holds no campaign-specific value of its own.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "measured",
+    "identities",
+    "profiles_file",
+    "suites_dir",
+    "data_dir",
+    "result_dir",
+    "engines",
+    "vendor_providers",
+    "page_name",
+    "default_invalidated_by",
+    "report"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9/_.-]*$"
+    },
+    "identities": {
+      "description": "Which library revisions a run records: `library` alone, or `library` plus `upstream` (a baseline the measured library is compared against).",
+      "type": "array",
+      "items": {
+        "enum": [
+          "library",
+          "upstream"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "measured": {
+      "description": "The measured project.",
+      "type": "object",
+      "required": [
+        "name",
+        "url",
+        "pin_file",
+        "extern_dir",
+        "build_script",
+        "binary",
+        "features",
+        "pin_env"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "minLength": 1
+        },
+        "pin_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extern_dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_script": {
+          "type": "string",
+          "minLength": 1
+        },
+        "binary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "features": {
+          "description": "The harness feature per vendor arm: one binary links one vendor library, so the arm decides the feature.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provider_packages": {
+          "description": "Package names whose linked revisions are the measured provider's provenance, read from the checkout's lock file.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "pin_env": {
+          "description": "The variable names the build script writes into its output file.",
+          "type": "object",
+          "required": [
+            "rev",
+            "dirty",
+            "dir"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "rev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dirty": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dir": {
+              "type": "string",
+              "minLength": 1
+            },
+            "features": {
+              "type": "string",
+              "minLength": 1
+            },
+            "env": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bin_dir": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "build_argv": {
+          "description": "How the recorder invokes the build script, as a template. Tokens: {build_script} {checkout} {upstream} {out} {binary} {vendor}. Defaults to `{build_script} {checkout} {out} {binary}`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "protocol": {
+          "description": "Where the pinned/idle timing protocol lives: in the measured checkout, or in this campaign repository.",
+          "enum": [
+            "measured",
+            "campaign"
+          ]
+        }
+      }
+    },
+    "upstream": {
+      "description": "The optional second recorded identity (a baseline), required when `identities` names `upstream`.",
+      "type": "object",
+      "required": [
+        "name",
+        "url",
+        "pin_file",
+        "extern_dir",
+        "pin_env"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "minLength": 1
+        },
+        "pin_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extern_dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pin_env": {
+          "type": "object",
+          "required": [
+            "rev",
+            "dirty",
+            "dir"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "rev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dirty": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dir": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "profiles_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "suites_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "result_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engines": {
+      "description": "Engine name the harness emits -> provider.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "vendor_providers": {
+      "description": "Providers that own the BLAS/LAPACK symbols. They are mutually exclusive in one process, so they are the axis a run -- and a page -- is split on.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "vendor_env": {
+      "description": "Thread-budget and tuning variables that belong to a vendor library, removed from the measured process's environment.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "csv_columns": {
+      "description": "The columns the harness's CSV must carry, as the report and the comparison read them.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "page_name": {
+      "description": "Template naming a published page. Tokens: {library12} {upstream12} {version} {vendor} {dirty}. For example `{library12}{version}{vendor}{dirty}` for one measured revision, or `{library12}-{upstream12}{vendor}{dirty}` when a baseline is recorded too.",
+      "type": "string",
+      "minLength": 1
+    },
+    "default_invalidated_by": {
+      "description": "Paths in the measured repository whose commits make an existing result out of date, when a suite declaration does not state its own.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "report": {
+      "description": "The strings the generated index and report headers print.",
+      "type": "object",
+      "required": [
+        "library_label",
+        "provider_label",
+        "harness_label",
+        "index_generator",
+        "setup_script"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "library_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "harness_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index_generator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "setup_script": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

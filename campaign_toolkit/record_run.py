@@ -1,0 +1,489 @@
+#!/usr/bin/env python3
+"""Record one (profile, suite) run: build at a revision, verify, measure, publish.
+
+Order matters and is enforced here:
+
+1. one campaign-level admission lock is taken first and held across build,
+   verify and timing. The campaign is one measurement at a time and no build
+   while a measurement runs; a lock inside a per-revision target directory
+   would let a second recorder build another revision during this one;
+2. the harness is built out of the measured checkout (or this repository, when
+   the campaign owns the harness), into a target directory keyed by revision;
+3. the harness's `verify` runs over every population and thread budget before any
+   timing, and a mismatch aborts the run (nothing is published from an
+   unverified run);
+4. each measurement goes through the pinned, idle-checked protocol script;
+5. the manifest is validated against its schema *before* it is written, and the
+   recorded commit must resolve in the checkout it names.
+
+The harness's `info` output and its CSV columns are its contract with the
+recorder: `info` prints one `key=value` per line (the vendor identity is read
+back from the binary rather than inferred from the arm requested), and `run
+--csv` writes the columns the report reads. Both are declared by the campaign's
+descriptor and by the harness, not restated here.
+"""
+import argparse
+import csv
+import datetime
+import fcntl
+import hashlib
+import os
+import pathlib
+import platform
+import shlex
+import subprocess
+import sys
+
+import yaml
+
+from . import descriptor
+from .campaign import (engines_for_vendor, populations, provider_of, same_populations,
+                       vendor_engines)
+
+
+def sh(cmd, **kw):
+    print(f"+ {' '.join(str(c) for c in cmd)}", file=sys.stderr)
+    return subprocess.run([str(c) for c in cmd], check=True, text=True,
+                          capture_output=True, **kw)
+
+
+def git(dir_, *args):
+    return subprocess.run(["git", "-C", str(dir_), *args], check=True,
+                          text=True, capture_output=True).stdout.strip()
+
+
+def build(checkout, vendor, upstream=None):
+    d = descriptor.current()
+    env_file = d.root / "target" / f"pin-{vendor}.env"
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    template = (d.measured.get("build_argv")
+                or ["{build_script}", "{checkout}", "{out}", "{binary}"])
+    tokens = {
+        "build_script": str(d.root / d.measured["build_script"]),
+        "checkout": str(checkout),
+        "upstream": str(upstream) if upstream else "",
+        "out": str(env_file),
+        "binary": d.measured["binary"],
+        "vendor": vendor,
+    }
+    sh([token.format(**tokens) for token in template],
+       env=dict(os.environ, BENCH_VENDOR=vendor))
+    pin = {}
+    for line in env_file.read_text().splitlines():
+        if "=" not in line:
+            continue
+        # The builder writes shell assignments with `printf %q`, so they are read back as shell
+        # words: `.strip("\'\"")` leaves the backslash `%q` puts before a space.
+        (assignment,) = shlex.split(line)
+        k, _, v = assignment.partition("=")
+        pin[k] = v
+    return pin
+
+
+def host_info(profile_name, profiles):
+    profile = next(p for p in profiles if p["name"] == profile_name)
+    lscpu = subprocess.run(["lscpu"], capture_output=True, text=True).stdout
+    logical = next((int(line.split(":")[1].strip()) for line in lscpu.splitlines()
+                    if line.startswith("CPU(s):")), 0)
+    l3 = next((line.split(":", 1)[1].strip() for line in lscpu.splitlines()
+               if line.startswith("L3 cache:")), None)
+    return {
+        "hostname": platform.node(),
+        "cpu": profile["cpu"],
+        "os": f"{platform.system()} {platform.release()}",
+        "arch": platform.machine(),
+        "logical_cpus": logical or profile["logical_cpus"],
+        "l3": l3 or profile.get("l3"),
+        "l3_domains": profile.get("l3"),
+        "notes": profile.get("description"),
+    }
+
+
+def vendor_identity(binary, env):
+    """`<binary> info` -> the vendor's own account of what was linked.
+
+    Read from the binary that will be measured, executed directly the way the
+    recorder executes it, so a loader or link problem shows up here rather than
+    halfway through a timing pass.
+    """
+    out = subprocess.run([str(binary), "info"], capture_output=True, text=True, env=env)
+    if out.returncode != 0:
+        sys.exit(f"ERROR: {binary} info failed: {out.stderr.strip()}")
+    fields = {}
+    for line in out.stdout.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            fields[k.strip()] = v.strip()
+    return fields
+
+
+def lock_providers(lock_path):
+    """The measured provider's package dependencies, from the checkout's own `Cargo.lock`.
+
+    Which dependency revisions were linked is provenance: their patches can move
+    numerical behaviour, so a page that names the measured commit but not the
+    provider it was built against cannot be compared with one built against a
+    different provider. A registry dependency records its name and version; a git
+    dependency records its revision in `commit`. Each entry keeps the package's own
+    name, never the engine's provider name, so it cannot collide with a provider.
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # py3.10 has no tomllib; the lock is provenance, not a gate
+        return []
+
+    d = descriptor.current()
+    packages_of_interest = d.provider_packages
+    lock = pathlib.Path(lock_path)
+    if not lock.exists():
+        return []
+    packages = tomllib.loads(lock.read_text()).get("package", [])
+    out = []
+    for pkg in packages:
+        if pkg.get("name") not in packages_of_interest:
+            continue
+        source = pkg.get("source") or ""
+        commit = source.rsplit("#", 1)[-1] if source.startswith("git+") and "#" in source else None
+        note = "linked dependency of the measured provider"
+        if source:
+            note += f"; source {source}"
+        out.append({"name": pkg["name"], "version": pkg.get("version"),
+                    "commit": commit, "path": None, "note": note})
+    return out
+
+
+def providers_for(engines, vendor, deps=()):
+    """The providers and vendor library this run was measured against.
+
+    The measured provider's entry names the revision the library block above
+    already records. The vendor entry is written from the identity the harness
+    read out of the linked library, never from the arm that was requested: the
+    point of reading it back is that the manifest records what was linked rather
+    than what was asked for.
+    """
+    d = descriptor.current()
+    out = []
+    names = {provider_of(e) for e in engines}
+    if set(d.measured_providers) & names:
+        measured_name = next(p for p in d.measured_providers if p in names)
+        out.append({"name": measured_name, "version": None, "commit": None, "path": None,
+                    "note": "the provider in the measured revision; see library above"})
+        out.extend(deps)
+    for provider in vendor_engines(engines):
+        if vendor.get("vendor.name") != provider:
+            continue
+        note = f"linked {vendor.get('vendor.linkage', '?')}"
+        if vendor.get("vendor.corename"):
+            note += f", kernel dispatched to {vendor['vendor.corename']}"
+        elif provider == "mkl":
+            note += ", kernel not reported by the vendor"
+        if vendor.get("vendor.config"):
+            note += f", config {vendor['vendor.config']}"
+        out.append({"name": provider, "version": vendor.get("vendor.version") or None,
+                    "commit": None, "path": None, "note": note})
+    return out
+
+
+def vendor_block(vendor, build_env):
+    """The structured vendor identity, or None when no vendor arm was declared."""
+    if not vendor.get("vendor.name") or vendor["vendor.name"] == "none":
+        return None
+    return {
+        "name": vendor["vendor.name"],
+        "linkage": vendor.get("vendor.linkage") or "none",
+        "version": vendor.get("vendor.version") or None,
+        "config": vendor.get("vendor.config") or None,
+        "corename": vendor.get("vendor.corename") or None,
+        "parallel": vendor.get("vendor.parallel") or None,
+        "procs": int(vendor["vendor.procs"]) if vendor.get("vendor.procs") else None,
+        "build_env": build_env or None,
+    }
+
+
+def skipped_of(csv_paths):
+    """`family/shape` pairs the harness reported as not applicable, per population.
+
+    Recorded rather than inferred: a family the provider rejects is coverage the
+    run did not have, and a page that claimed the whole grid would be wrong.
+    """
+    seen = {}
+    for path in csv_paths:
+        with open(path) as handle:
+            for row in csv.DictReader(handle):
+                if row.get("status") != "skipped":
+                    continue
+                key = row["regime"]
+                shape = row["n"] if row["m"] == row["n"] else f"{row['m']}x{row['n']}"
+                seen.setdefault(key, set()).add(f"{row['family']}/{shape}")
+    return seen
+
+
+def protocol_script(checkout, name):
+    """The timing protocol's location, from the descriptor.
+
+    A campaign whose harness lives in the measured checkout takes the protocol from
+    that checkout; one whose harness lives in the campaign repository owns it here.
+    """
+    d = descriptor.current()
+    where = d.measured.get("protocol", "measured")
+    base = (d.root / "benchmarks/scripts") if where == "campaign" else (checkout / "benchmarks/scripts")
+    return base / name
+
+
+def main(argv=None, root=None):
+    if root is not None:
+        descriptor.set_root(root)
+    d = descriptor.current()
+    pin_env = d.measured["pin_env"]
+    ap = argparse.ArgumentParser()
+    ap.add_argument("profile")
+    ap.add_argument("suite_id")
+    ap.add_argument("--checkout", default=str(d.checkout_dir("library")))
+    if d.has_upstream:
+        ap.add_argument("--upstream", default=str(d.checkout_dir("upstream")),
+                        help="the baseline checkout the harness links by path")
+    ap.add_argument("--reps", type=int, default=5)
+    ap.add_argument("--aa", type=int, default=1, help="number of complete set repeats (>=2 gives A/A)")
+    ap.add_argument("--prime-ms", type=int, default=500)
+    ap.add_argument("--regimes", default=None, help="override, comma separated")
+    ap.add_argument("--families", default=None,
+                    help="override: measure only these families (comma separated). The run records the "
+                         "subset it covered, so a partial population is visible rather than implied.")
+    ap.add_argument("--threads", default=None, help="override, comma separated")
+    ap.add_argument("--dtypes", default=None)
+    ap.add_argument("--engines", default=None,
+                    help="which engine rows to declare as this run's own, for a report. It does not "
+                         "select what the harness measures: the binary measures the rows it was "
+                         "built with, whatever this says.")
+    ap.add_argument("--vendor", default=None,
+                    help="which vendor arm to record: one binary links one vendor library, so an arm "
+                         "is its own run. Required when the suite declares more than one.")
+    ap.add_argument("--label", default=None, help="suffix for the run directory")
+    args = ap.parse_args(argv)
+
+    profiles = yaml.safe_load(d.profiles_file.read_text())["profiles"]
+    suite = yaml.safe_load(d.suite_path(args.suite_id).read_text())
+    spec = suite["runs"][0]
+    declared = populations(suite)
+    covered = declared
+    if args.regimes:
+        wanted = set(args.regimes.split(","))
+        covered = [p for p in declared if p["regime"] in wanted]
+    if args.families:
+        wanted = set(args.families.split(","))
+        declared_families = {f for p in declared for f in p["families"]}
+        unknown = wanted - declared_families
+        if unknown:
+            sys.exit(f"ERROR: {sorted(unknown)} are not declared by this suite")
+        covered = [dict(p, families=[f for f in p["families"] if f in wanted]) for p in covered]
+        covered = [p for p in covered if p["families"]]
+    threads = [int(t) for t in args.threads.split(",")] if args.threads else spec["threads"]
+    dtypes = args.dtypes.split(",") if args.dtypes else spec["dtypes"]
+    arms = vendor_engines(spec["engines"])
+    if args.vendor:
+        arm = args.vendor
+    elif len(arms) == 1:
+        arm = arms[0]
+    else:
+        sys.exit(f"ERROR: this suite declares the vendor arms {arms}, and one binary links one vendor "
+                 f"library, so one run records one of them: pass --vendor")
+    if arm not in arms:
+        sys.exit(f"ERROR: --vendor {arm!r} is not one of the arms this suite declares ({arms})")
+    if arm not in d.vendor_providers:
+        sys.exit(f"ERROR: unknown vendor arm {arm!r}; this campaign knows {list(d.vendor_providers)}")
+    # The engines this arm is expected to measure: the measured provider's rows every arm carries,
+    # plus this arm's own vendor row. Anything else is another binary's to measure.
+    engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
+    cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
+
+    # One measurement at a time, and no build while a measurement runs. Taken
+    # before the build and held for the whole run.
+    lock_path = d.root / "target/campaign.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(lock_path, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("ERROR: another campaign run holds target/campaign.lock; "
+                 "the campaign is one measurement at a time")
+
+    checkout = pathlib.Path(args.checkout)
+    upstream = pathlib.Path(args.upstream) if d.has_upstream else None
+    pin = build(checkout, arm, upstream)
+    rev, dirty = pin[pin_env["rev"]], pin[pin_env["dirty"]] == "true"
+    if dirty:
+        print("WARNING: the measured checkout is dirty; this cell will be marked dirty", file=sys.stderr)
+    upstream_block = None
+    if d.has_upstream:
+        up_env = d.upstream["pin_env"]
+        upstream_block = {
+            "url": d.upstream["url"],
+            "commit": pin[up_env["rev"]],
+            "version": pin.get(up_env.get("version", "")) or None,
+            "ref": pin.get(up_env.get("ref", "")) or None,
+            "dirty": pin[up_env["dirty"]] == "true",
+            "measured_path": pin[up_env["dir"]],
+        }
+
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    name = f"{stamp}-{args.label}" if args.label else stamp
+    run_dir = d.data_dir / args.profile / args.suite_id / name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    bin_dir = pathlib.Path(pin["BIN_DIR"])
+    binary = bin_dir / d.measured["binary"]
+    pinned = protocol_script(checkout, "pinned.sh")
+    idle = protocol_script(checkout, "idle_cpus.py")
+    if not pinned.exists() or not idle.exists():
+        sys.exit(f"ERROR: {pinned} or {idle} missing; the timing protocol must be present")
+
+    # The thread budget is the measurement's, not the environment's. The vendor
+    # library is set from the row's budget by the harness and read back, so an
+    # ambient value must not be inherited as if it were a declaration.
+    env = dict(os.environ)
+    for variable in d.vendor_env:
+        env.pop(variable, None)
+    env.setdefault("CARGO_BUILD_JOBS", str(max(1, (os.cpu_count() or 4) // 4)))
+
+    # What the harness reports it linked decides the manifest, not what was asked for: the arm
+    # and the binary have to agree, or the run is not recorded at all.
+    identity = vendor_identity(binary, env)
+    if identity.get("vendor.name") != arm:
+        sys.exit(f"ERROR: this run records the {arm} arm, but the harness built for it reports "
+                 f"{identity.get('vendor.name')!r}; a page may not name a vendor the binary did "
+                 f"not link")
+
+    guards = []
+    csvs = []
+
+    # 1. correctness first, for the whole covered grid, at every budget.
+    for population in covered:
+        for t in threads:
+            stem = f"verify-{population['regime']}-{t}t"
+            out = run_dir / f"{stem}.txt"
+            guard = run_dir / f"{stem}.guard"
+            r = subprocess.run([str(pinned), cpu_sets[str(t)], "--", str(binary), "verify",
+                                "--threads", str(t),
+                                "--n", ",".join(population["n"]),
+                                "--batch", ",".join(str(b) for b in population["batch"]),
+                                "--dtype", ",".join(dtypes),
+                                "--family", ",".join(population["families"])],
+                               env=env, capture_output=True, text=True)
+            out.write_text(r.stdout)
+            guard.write_text(r.stderr)
+            guards.append(guard.name)
+            if r.returncode != 0 or "MISMATCH" in r.stdout:
+                sys.exit(f"ERROR: verify failed for {population['regime']} {t}T (see {out}); nothing published")
+            if "all comparisons within tolerance" not in r.stdout:
+                sys.exit(f"ERROR: verify did not report a clean grid for {population['regime']} {t}T")
+
+    # 2. timing, one CSV per (repeat, population, threads).
+    for rep in range(args.aa):
+        for population in covered:
+            for t in threads:
+                stem = f"run{rep}-{population['regime']}-{t}t"
+                r = subprocess.run([str(pinned), cpu_sets[str(t)], "--", str(binary), "run",
+                                    "--threads", str(t),
+                                    "--n", ",".join(population["n"]),
+                                    "--batch", ",".join(str(b) for b in population["batch"]),
+                                    "--dtype", ",".join(dtypes),
+                                    "--family", ",".join(population["families"]),
+                                    "--regime", population["regime"],
+                                    "--reps", str(args.reps), "--prime-ms", str(args.prime_ms),
+                                    "--csv", str(run_dir / f"{stem}.csv")],
+                                   env=env, capture_output=True, text=True)
+                (run_dir / f"{stem}.guard").write_text(r.stderr)
+                guards.append(f"{stem}.guard")
+                if r.returncode != 0:
+                    sys.exit(f"ERROR: run failed for {population['regime']} {t}T (repeat {rep}): {r.stderr[-2000:]}")
+                if not (run_dir / f"{stem}.csv").exists():
+                    sys.exit(f"ERROR: no CSV produced for {population['regime']} {t}T")
+                csvs.append(str(run_dir / f"{stem}.csv"))
+
+    skipped = skipped_of(csvs)
+    recorded = []
+    for population in covered:
+        entry = dict(population)
+        if skipped.get(population["regime"]):
+            entry["skipped"] = sorted(skipped[population["regime"]])
+        recorded.append(entry)
+
+    manifest = {
+        "schema_version": 1,
+        "target_profile": args.profile,
+        "suite_id": args.suite_id,
+        "suite_file": f"{d.data['suites_dir']}/{args.suite_id}.yaml",
+        "suite_sha256": hashlib.sha256(d.suite_path(args.suite_id).read_bytes()).hexdigest(),
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "command": " ".join(sys.argv),
+        "library": {
+            "url": d.measured["url"],
+            "commit": rev,
+            "dirty": dirty,
+            "features": [f for f in pin[pin_env["features"]].split(",") if f],
+            "measured_path": pin[pin_env["dir"]],
+            "version": None,
+        },
+        **({"upstream": upstream_block} if upstream_block else {}),
+        "vendor": vendor_block(identity, pin.get("BUILD_ENV")),
+        "harness": {
+            "commit": git(d.root, "rev-parse", "HEAD"),
+            "dirty": bool(git(d.root, "status", "--porcelain", "--untracked-files=no")),
+        },
+        "host": host_info(args.profile, profiles),
+        "threads": {
+            "counts": threads,
+            "cpu_sets": cpu_sets,
+            "env": {k: os.environ.get(k) for k in d.vendor_env},
+            "note": "the vendor's budget is set by the harness from the row's thread count and "
+                    "read back before each measurement; these variables were removed from the "
+                    "measured process's environment so it cannot inherit a different one",
+        },
+        "timing_policy": {
+            "version": 1,
+            "minimum_untimed_priming_ms": args.prime_ms,
+            "statistic": "best",
+            "repetitions": args.reps,
+            "notes": "priming is time-based, not a call count: after an idle gate this host "
+                     "reads low for the first second or two of sustained work",
+        },
+        "guards": {
+            "idle_window_seconds": int(os.environ.get("PINNED_IDLE_SECONDS", 3)),
+            "max_busy_percent": round(float(os.environ.get("PINNED_MAX_BUSY", 0.05)) * 100, 3),
+            "attempts": int(os.environ.get("PINNED_RETRIES", 3)),
+            "sibling_aware": True,
+            "logs": sorted(set(guards)),
+        },
+        "providers": providers_for(engines, identity,
+                                   lock_providers(pathlib.Path(pin[pin_env["dir"]]) / "Cargo.lock")),
+        "invalidated_by": suite.get("invalidated_by", d.default_invalidated_by),
+        "result_files": [pathlib.Path(c).name for c in csvs],
+        "run_spec": {
+            "populations": recorded,
+            "dtypes": dtypes,
+            "engines": engines,
+            "aa": args.aa,
+            "covers_declared_suite": (threads == spec["threads"]
+                                      and dtypes == spec["dtypes"]
+                                      and engines == engines_for_vendor(suite, arm)
+                                      and same_populations(covered, declared)),
+        },
+    }
+
+    manifest_path = run_dir / "run.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    v = descriptor.run_module("validate_run", [str(manifest_path)], root=d.root, capture=True)
+    print(v.stdout + v.stderr, file=sys.stderr)
+    if v.returncode != 0:
+        sys.exit("ERROR: run.yaml does not validate; nothing published")
+
+    subprocess.run([sys.executable, "-m", "campaign_toolkit.report_run",
+                    "--run-dir", str(run_dir)],
+                   env=dict(os.environ, CAMPAIGN_ROOT=str(d.root)),
+                   cwd=str(pathlib.Path(__file__).resolve().parent.parent), check=True)
+    descriptor.run_module("publish_report", [str(run_dir)], root=d.root)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

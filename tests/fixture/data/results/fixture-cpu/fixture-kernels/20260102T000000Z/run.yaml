@@ -1,0 +1,97 @@
+schema_version: 1
+target_profile: fixture-cpu
+suite_id: fixture-kernels
+suite_file: benchmarks/suites/fixture-kernels.yaml
+suite_sha256: '@SUITE_SHA@'
+timestamp: '2026-01-02T00:00:00Z'
+command: scripts/record_run.py fixture-cpu fixture-kernels --vendor openblas
+library:
+  url: https://example.invalid/fixture-rs
+  commit: '@COMMIT@'
+  dirty: false
+  features:
+  - fixture-bench/link-openblas
+  measured_path: /nonexistent/fixture-rs
+  version: null
+vendor:
+  name: openblas
+  linkage: static
+  version: '0.3.99'
+  config: Fixture OpenBLAS
+  corename: FIXTUREKERNEL
+  parallel: openmp
+  procs: 8
+  build_env: FIXTURE_DYNAMIC_ARCH=1
+harness:
+  commit: deadbeef
+  dirty: false
+host:
+  hostname: fixture-host
+  cpu: Fixture CPU
+  os: Linux 0.0
+  arch: x86_64
+  logical_cpus: 8
+  l3: 8 MiB
+  l3_domains: '0-7: 8 MiB shared'
+  notes: fixture profile
+threads:
+  counts:
+  - 1
+  cpu_sets:
+    '1': '0'
+  env:
+    OPENBLAS_NUM_THREADS: null
+    OMP_NUM_THREADS: null
+  note: the fixture declares the budget; nothing was measured
+timing_policy:
+  version: 1
+  minimum_untimed_priming_ms: 500
+  statistic: best
+  repetitions: 5
+  notes: fixture
+guards:
+  idle_window_seconds: 3
+  max_busy_percent: 5.0
+  attempts: 3
+  sibling_aware: true
+  logs:
+  - verify-small-1t.guard
+providers:
+- name: algo
+  version: null
+  commit: null
+  path: null
+  note: the provider in the measured revision
+- name: fixdeps
+  version: '1.2.3'
+  commit: null
+  path: null
+  note: linked dependency of the measured provider
+- name: openblas
+  version: '0.3.99'
+  commit: null
+  path: null
+  note: linked static
+invalidated_by:
+- crates/fixture/**
+result_files:
+- run0-small-1t.csv
+run_spec:
+  populations:
+  - regime: small
+    families:
+    - mul
+    - solve
+    n:
+    - '4'
+    - '8'
+    batch:
+    - 1
+  dtypes:
+  - f64
+  engines:
+  - algo-lane
+  - algo-pool
+  - blas-openblas
+  aa: 1
+  covers_declared_suite: true

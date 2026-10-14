@@ -1,0 +1,53 @@
+schema_version: 1
+id: fixture-kernels
+description: >-
+  A synthetic suite: two families over one shape grid at one thread budget,
+  against a measured provider and one vendor provider. It exists to exercise the
+  validation, index, comparison and report paths without a real build.
+invalidated_by:
+  - crates/fixture/**
+stale_after: 5
+required_profiles:
+  - fixture-cpu
+optional_profiles: []
+
+family_groups:
+  core:
+    - mul
+    - solve
+
+workloads:
+  name: fixture kernels
+  description: >-
+    Synthetic dense kernels, one call per case, so a result page and an index can
+    be produced without a measured library.
+  source: >-
+    Declared for the toolkit's self-test; no real provider backs it.
+  known_blind_spots:
+    - "Nothing here is a measurement; the fixture only exercises the tooling."
+
+engines_doc:
+  algo-lane:
+    provider: algo
+    summary: The measured provider on one sequential lane. The overhead baseline.
+    identity: the measured revision
+  algo-pool:
+    provider: algo
+    summary: The measured provider on a host-owned pool of the row's thread budget.
+    identity: the measured revision
+    caveat: A count hint is not a hard active-thread limit.
+  blas-openblas:
+    provider: openblas
+    summary: The vendor provider, one call per case, vendor-owned threading.
+    identity: the vendor build recorded in this run's manifest
+
+runs:
+  - threads: [1]
+    cpu_sets: ["0"]
+    dtypes: [f64]
+    engines: [algo-lane, algo-pool, blas-openblas]
+    populations:
+      - regime: small
+        groups: [core]
+        n: ["4", "8"]
+        batch: [1]

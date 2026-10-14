@@ -1,0 +1,26 @@
+name: ci
+on: [push, pull_request]
+# The measurement itself runs on the host that owns the numbers, not here. What is
+# left for this repository is content: the package, the schemas, the fixture
+# campaign and the self-test. That is one small job, and it must pass on this
+# repository alone -- no campaign checkout, no build, no network beyond pip.
+jobs:
+  content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python3 -m pip install --quiet -e .
+      - name: Descriptor and suite declarations are well formed
+        run: python3 -m campaign_toolkit.declarations --root tests/fixture
+      - name: Every module compiles
+        run: python3 -m py_compile campaign_toolkit/*.py tests/test_toolkit.py
+      - name: Self-test against the fixture campaign
+        run: python3 -m unittest discover -s tests -v
+      - name: Ruff
+        run: |
+          python3 -m pip install --quiet ruff
+          ruff check campaign_toolkit tests

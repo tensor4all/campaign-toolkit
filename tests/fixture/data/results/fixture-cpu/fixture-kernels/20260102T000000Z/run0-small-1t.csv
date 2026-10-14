@@ -1,0 +1,13 @@
+regime,family,dtype,m,n,batch,row,threads,total_ms,per_item_us,status,note
+small,mul,f64,4,4,1,algo-lane,1,0.3800,1.0000,ok,
+small,mul,f64,4,4,1,algo-pool,1,0.3420,1.0000,ok,
+small,mul,f64,4,4,1,blas-openblas,1,0.3040,1.0000,ok,
+small,mul,f64,8,8,1,algo-lane,1,0.7600,1.0000,ok,
+small,mul,f64,8,8,1,algo-pool,1,0.6840,1.0000,ok,
+small,mul,f64,8,8,1,blas-openblas,1,0.6080,1.0000,ok,
+small,solve,f64,4,4,1,algo-lane,1,0.7600,1.0000,ok,
+small,solve,f64,4,4,1,algo-pool,1,0.6840,1.0000,ok,
+small,solve,f64,4,4,1,blas-openblas,1,0.6080,1.0000,ok,
+small,solve,f64,8,8,1,algo-lane,1,1.5200,1.0000,ok,
+small,solve,f64,8,8,1,algo-pool,1,1.3680,1.0000,ok,
+small,solve,f64,8,8,1,blas-openblas,1,1.2160,1.0000,ok,

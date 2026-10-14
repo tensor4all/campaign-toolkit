@@ -1,0 +1,167 @@
+"""Self-test for the toolkit, against a synthetic fixture campaign in tests/fixture.
+
+It never builds or measures anything: it exercises the content paths only --
+descriptor validation, manifest validation, the report, publication and the
+generated index, and the run comparison. A throwaway git repository stands in for
+the measured checkout so the recorded commit resolves the way it does in a real
+campaign.
+"""
+import contextlib
+import hashlib
+import io
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+TOOLKIT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(TOOLKIT))
+
+from campaign_toolkit import (  # noqa: E402
+    compare_runs, descriptor, gen_index, publish_report, report_run, validate_run,
+)
+
+FIXTURE = TOOLKIT / "tests/fixture"
+SUITE_REL = "benchmarks/suites/fixture-kernels.yaml"
+RUN_A_REL = "data/results/fixture-cpu/fixture-kernels/20260101T000000Z"
+RUN_B_REL = "data/results/fixture-cpu/fixture-kernels/20260102T000000Z"
+
+# The toolkit must hold no campaign's specifics: everything comes from the
+# descriptor. A campaign's name here would mean something leaked.
+FORBIDDEN_IN_PACKAGE = ("tlinalg", "faer", "tlbench", "fbench")
+
+
+def git(cwd, *args, **env):
+    full = dict(os.environ, GIT_AUTHOR_NAME="fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+                GIT_COMMITTER_NAME="fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid", **env)
+    return subprocess.run(["git", *args], cwd=cwd, env=full, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+class FixtureCampaignTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name) / "campaign"
+        shutil.copytree(FIXTURE, self.root)
+
+        # A checkout the recorded commit can resolve in, standing in for the
+        # measured project.
+        self.checkout = self.root / "extern/fixture-rs"
+        self.checkout.mkdir(parents=True)
+        git(self.checkout, "init", "-q")
+        (self.checkout / "README").write_text("fixture\n")
+        git(self.checkout, "add", "README")
+        git(self.checkout, "commit", "-q", "-m", "fixture")
+        rev = git(self.checkout, "rev-parse", "HEAD")
+
+        suite = self.root / SUITE_REL
+        sha = hashlib.sha256(suite.read_bytes()).hexdigest()
+        for path in self.root.rglob("*"):
+            if path.suffix in (".yaml", ".rev"):
+                text = path.read_text().replace("@COMMIT@", rev).replace("@SUITE_SHA@", sha)
+                path.write_text(text)
+        descriptor.set_root(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_descriptor_loads(self):
+        d = descriptor.load_descriptor(self.root)
+        self.assertEqual(d["id"], "fixture-campaign")
+        self.assertEqual(d.identities, ["library"])
+        self.assertEqual(d.engines["algo-lane"], "algo")
+        self.assertEqual(d.vendor_providers, ("openblas",))
+        self.assertEqual(d.measured_providers, ("algo",))
+        self.assertEqual(len(d.csv_columns), 12)
+
+    def test_descriptor_path_can_be_named(self):
+        alt = self.root / "alt-campaign.yaml"
+        shutil.copy(self.root / "benchmarks/campaign.yaml", alt)
+        os.environ["CAMPAIGN_DESCRIPTOR"] = "alt-campaign.yaml"
+        try:
+            d = descriptor.load_descriptor(self.root)
+        finally:
+            del os.environ["CAMPAIGN_DESCRIPTOR"]
+        self.assertEqual(d["id"], "fixture-campaign")
+        self.assertEqual(d.path.resolve(), alt.resolve())
+
+    def test_every_manifest_validates(self):
+        manifests = sorted((self.root / "data/results").rglob("run.yaml"))
+        self.assertEqual(len(manifests), 2)
+        for manifest in manifests:
+            self.assertEqual(validate_run.validate(str(manifest)), [], f"{manifest}")
+
+    def test_report_publish_and_index(self):
+        run_a = self.root / RUN_A_REL
+        self.assertEqual(report_run.main(["--run-dir", str(run_a)], root=self.root), 0)
+        self.assertTrue((run_a / "report.md").exists())
+
+        self.assertEqual(publish_report.main([str(run_a)], root=self.root), 0)
+        index = self.root / "result/INDEX.md"
+        self.assertTrue(index.exists())
+        self.assertIn("fixture-kernels", index.read_text())
+        # The generator reproduces what publication just wrote, byte for byte.
+        self.assertEqual(gen_index.main(["--check"], root=self.root), 0)
+
+        # And rewriting it changes nothing.
+        before = index.read_bytes()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        self.assertEqual(index.read_bytes(), before)
+
+    def test_compare_runs(self):
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            rc = compare_runs.main([str(self.root / RUN_A_REL), str(self.root / RUN_B_REL)],
+                                   root=self.root)
+        self.assertEqual(rc, 0)
+        out = buffer.getvalue()
+        self.assertIn(" -> ", out)
+        self.assertIn("- vendor arm: `openblas` on both sides", out)
+        self.assertIn("## Per cell", out)
+        self.assertIn("## Per family", out)
+
+    def test_compare_refuses_two_vendor_arms(self):
+        other = self.root / RUN_B_REL / "run.yaml"
+        other.write_text(other.read_text().replace("name: openblas", "name: mkl", 1))
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), self.assertRaises(SystemExit):
+            compare_runs.main([str(self.root / RUN_A_REL), str(self.root / RUN_B_REL)], root=self.root)
+
+    def test_bad_descriptor_is_refused(self):
+        bad = pathlib.Path(self.tmp.name) / "bad"
+        shutil.copytree(FIXTURE, bad)
+        text = (bad / "benchmarks/campaign.yaml").read_text()
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("page_name:"))
+        (bad / "benchmarks/campaign.yaml").write_text(text)
+        with self.assertRaises(SystemExit):
+            descriptor.load_descriptor(bad)
+
+
+class ToolkitRepositoryTest(unittest.TestCase):
+    def test_package_holds_no_campaign_names(self):
+        for path in sorted((TOOLKIT / "campaign_toolkit").rglob("*")):
+            if path.suffix not in (".py", ".json"):
+                continue
+            text = path.read_text()
+            for name in FORBIDDEN_IN_PACKAGE:
+                self.assertNotIn(name, text, f"{path} mentions {name!r}")
+
+    def test_top_level_schemas_match_the_packaged_copies(self):
+        for packaged in sorted((TOOLKIT / "campaign_toolkit/schemas").glob("*.json")):
+            top = TOOLKIT / "schemas" / packaged.name
+            self.assertTrue(top.exists(), f"{top} is missing")
+            self.assertEqual(top.read_bytes(), packaged.read_bytes(),
+                             f"{top} has drifted from {packaged}")
+
+    def test_schemas_are_valid_documents(self):
+        from campaign_toolkit import jsonschema_lite
+        for path in sorted((TOOLKIT / "campaign_toolkit/schemas").glob("*.json")):
+            import json
+            jsonschema_lite.check_schema(json.loads(path.read_text()))
+
+
+if __name__ == "__main__":
+    unittest.main()

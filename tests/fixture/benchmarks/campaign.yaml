@@ -1,0 +1,63 @@
+schema_version: 1
+id: fixture-campaign
+
+measured:
+  name: fixture-rs
+  url: https://example.invalid/fixture-rs
+  pin_file: pins/fixture-rs.rev
+  extern_dir: extern/fixture-rs
+  build_script: scripts/build_fixture_rev.sh
+  binary: fixturebench
+  features:
+    openblas: fixture-bench/link-openblas
+  provider_packages:
+    - fixdeps
+  pin_env:
+    rev: FIXTURE_REV
+    dirty: FIXTURE_DIRTY
+    dir: FIXTURE_DIR
+    features: BUILD_FEATURES
+
+identities: [library]
+
+profiles_file: benchmarks/profiles.yaml
+suites_dir: benchmarks/suites
+data_dir: data/results
+result_dir: result
+
+engines:
+  algo-lane: algo
+  algo-pool: algo
+  blas-openblas: openblas
+
+vendor_providers: [openblas]
+
+page_name: "{library12}{version}{vendor}{dirty}"
+
+default_invalidated_by:
+  - crates/fixture/**
+
+vendor_env:
+  - OPENBLAS_NUM_THREADS
+  - OMP_NUM_THREADS
+
+csv_columns:
+  - regime
+  - family
+  - dtype
+  - m
+  - n
+  - batch
+  - row
+  - threads
+  - total_ms
+  - per_item_us
+  - status
+  - note
+
+report:
+  library_label: fixture-rs commit
+  provider_label: fixdeps provider
+  harness_label: harness commit
+  index_generator: scripts/gen_index.py
+  setup_script: scripts/setup_extern_deps.sh

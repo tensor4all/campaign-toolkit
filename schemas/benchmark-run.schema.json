@@ -1,0 +1,524 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tensor4all.example/schemas/benchmark-run.schema.json",
+  "title": "Benchmark Run Metadata",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "target_profile",
+    "suite_id",
+    "suite_file",
+    "timestamp",
+    "library",
+    "host",
+    "threads",
+    "timing_policy",
+    "harness",
+    "command"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "target_profile": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "suite_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9/_.-]*$"
+    },
+    "suite_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "library": {
+      "type": "object",
+      "required": [
+        "url",
+        "commit",
+        "dirty",
+        "features"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{7,40}$"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "measured_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where the checkout happened to live on the measuring host. Informational only: a committed manifest must validate in any checkout, so nothing resolves against this."
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Release version of the measured revision, when the measured project has one. An unpublished library records null here; a versioned one records both this and the commit."
+        }
+      }
+    },
+    "upstream": {
+      "description": "The optional second recorded library revision: a baseline the measured library is compared against, when the campaign's descriptor declares `identities: [library, upstream]`. A campaign may record one revision or two; the toolkit requires neither count, so this property is allowed rather than required. When present it is validated and resolved exactly like `library`.",
+      "type": "object",
+      "required": [
+        "url",
+        "commit",
+        "dirty"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{7,40}$"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The ref the revision was pinned by, typically a release tag, so the pin is reproducible and not only a hash."
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "measured_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where the checkout happened to live on the measuring host. Informational only, like `library.measured_path`."
+        }
+      }
+    },
+    "vendor": {
+      "description": "The BLAS/LAPACK library the measured provider was linked against, as the harness reported it from the vendor's own introspection. A measurement whose vendor cannot be named is not evidence, so `validate_run.py` refuses a manifest whose declared engines include a vendor arm and whose `vendor` is absent.",
+      "type": "object",
+      "required": [
+        "name",
+        "linkage"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "linkage": {
+          "enum": [
+            "static",
+            "shared",
+            "none"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The build configuration string the vendor reports, for example `OpenBLAS 0.3.32 NO_AFFINITY COOPERLAKE MAX_THREADS=24`."
+        },
+        "corename": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The kernel the vendor's runtime dispatched to. Not necessarily the target the build was configured for: an AVX-512 host can select an Intel-named kernel, which is a fact to record rather than an error to hide."
+        },
+        "parallel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "procs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "build_env": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The build-time environment the campaign declares for the vendor library, for example `OPENBLAS_DYNAMIC_ARCH=1`. It is recorded because it decides what was linked: without it a from-source OpenBLAS guesses a target from the build host, which is not a build a measurement should depend on."
+        }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "required": [
+        "commit",
+        "dirty"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "required": [
+        "hostname",
+        "cpu",
+        "logical_cpus"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "hostname": {
+          "type": "string"
+        },
+        "cpu": {
+          "type": "string"
+        },
+        "os": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "arch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logical_cpus": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "l3": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "l3_domains": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Per-domain L3 description from the hardware profile. On a host whose cores share one L3 this repeats `l3`; on a heterogeneous host (different L3 sizes per core group) it is the fact that decides whether a thread set spans one domain or two."
+        }
+      }
+    },
+    "threads": {
+      "type": "object",
+      "required": [
+        "counts",
+        "cpu_sets"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "counts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 1
+        },
+        "cpu_sets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "How the budget was enforced, when that needs saying: for a vendor-backed provider the harness sets the vendor's own thread count and reads it back, so the row's label is a fact rather than a hope."
+        }
+      }
+    },
+    "timing_policy": {
+      "type": "object",
+      "required": [
+        "version",
+        "minimum_untimed_priming_ms",
+        "statistic",
+        "repetitions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "minimum_untimed_priming_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "statistic": {
+          "enum": [
+            "best",
+            "median"
+          ]
+        },
+        "repetitions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "version"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "guards": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idle_window_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_busy_percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sibling_aware": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the idle gate also checked the SMT siblings of the measured CPUs. A busy sibling contends with the physical core being measured, and upstream's script checked only the listed logical CPUs, so this is stated rather than assumed."
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "invalidated_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "result_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "run_spec": {
+      "description": "What this particular run covered. A subset of the suite declaration is a valid run: the campaign is not run in full on every profile.",
+      "type": "object",
+      "required": [
+        "populations",
+        "dtypes",
+        "engines",
+        "aa"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "populations": {
+          "description": "The resolved populations this run covered: one `family x shape grid x regime` block per declared population, after group expansion. Coverage is a statement about these, not about a scalar size knob.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "regime",
+              "families",
+              "n",
+              "batch"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "regime": {
+                "type": "string",
+                "minLength": 1
+              },
+              "families": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              },
+              "n": {
+                "description": "Matrix dimensions: `N` for square, `MxN` for rectangular.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(x[0-9]+)?$"
+                },
+                "minItems": 1
+              },
+              "batch": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 1
+              },
+              "skipped": {
+                "description": "`family/shape` pairs the harness reported as not applicable to that family. Recorded, not inferred: a family the provider rejects is coverage the run did not have.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "dtypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "engines": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "aa": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "covers_declared_suite": {
+          "type": "boolean"
+        }
+      }
+    },
+    "suite_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Hash of the suite declaration in force when the run was taken. Evidence is immutable and declarations are not: without this, a manifest and a later declaration can disagree with no way to tell which moved."
+    }
+  }
+}

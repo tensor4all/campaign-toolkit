@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tensor4all.example/schemas/benchmark-suite.schema.json",
+  "title": "Benchmark Suite Declaration",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "description",
+    "invalidated_by",
+    "stale_after",
+    "required_profiles",
+    "runs",
+    "workloads",
+    "engines_doc",
+    "family_groups"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9/_.-]*$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "invalidated_by": {
+      "description": "Paths in the measured repository whose commits make an existing result out of date.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "stale_after": {
+      "description": "Number of invalidating commits between the measured revision and the campaign descriptor's reference pin at which the cell becomes stale.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "required_profiles": {
+      "description": "Profiles that must have a current cell; a missing one fails CI.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "optional_profiles": {
+      "description": "Profiles reported when present and shown as missing otherwise, without failing CI.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "family_groups": {
+      "description": "Named sets of families. A population refers to groups instead of repeating family lists, so a family added to a group is measured by every population that declares it.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "runs": {
+      "description": "The measurements this suite declares.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "threads",
+          "cpu_sets",
+          "populations",
+          "dtypes",
+          "engines"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "threads": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "cpu_sets": {
+            "description": "One line for each thread count, in the order of `threads`.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "populations": {
+            "description": "Populations of `family group x shape grid x regime`. Declaring them explicitly, instead of one product over every family and shape, is what keeps the run affordable and its coverage legible.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "regime",
+                "groups",
+                "n",
+                "batch"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "regime": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "groups": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "n": {
+                  "description": "Matrix dimensions: `N` for square, `MxN` for rectangular.",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[0-9]+(x[0-9]+)?$"
+                  },
+                  "minItems": 1
+                },
+                "batch": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          "dtypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "engines": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "case_filter": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stress": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "workloads": {
+      "description": "What the workload is, in a form the result page can print.",
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "known_blind_spots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "engines_doc": {
+      "description": "One entry per engine the suite may declare, so a result page can explain every column it prints without the reader having any context.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "summary",
+          "identity",
+          "provider"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "caveat": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider": {
+            "description": "Name of the entry in run.yaml's `providers` that states the revision this engine actually ran against.",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
