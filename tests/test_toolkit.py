@@ -112,6 +112,41 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
         self.assertEqual(index.read_bytes(), before)
 
+    def test_index_reports_absent_checkout_only_when_something_is_recorded(self):
+        # A campaign that has measured nothing has no currency to compute, so an absent
+        # checkout is a note rather than a failure; once a page exists it is the reason
+        # the index cannot say whether that page is current.
+        root = pathlib.Path(self.tmp.name) / "empty"
+        shutil.copytree(FIXTURE, root)
+        shutil.rmtree(root / "extern", ignore_errors=True)
+        shutil.rmtree(root / "data", ignore_errors=True)
+        suite = root / SUITE_REL
+        suite.write_text(suite.read_text().replace(
+            "required_profiles:\n  - fixture-cpu\noptional_profiles: []",
+            "required_profiles: []\noptional_profiles:\n  - fixture-cpu"))
+        self.assertEqual(gen_index.main(["--write"], root=root), 0)
+        self.assertEqual(gen_index.main(["--check"], root=root), 0)
+
+    def test_dual_identity_index_names_both_revisions(self):
+        # A campaign that records a baseline prints the fork identity in every line that
+        # carries the revision identity, so two revisions cannot be read as one.
+        import yaml as _yaml
+        path = self.root / "benchmarks/campaign.yaml"
+        data = _yaml.safe_load(path.read_text())
+        data["identities"] = ["library", "upstream"]
+        data["upstream"] = {
+            "name": "fixture-upstream", "url": "https://example.invalid/upstream",
+            "pin_file": "pins/fixture-rs.rev", "extern_dir": "extern/upstream",
+            "pin_env": {"rev": "UP_REV", "dirty": "UP_DIRTY", "dir": "UP_DIR"},
+        }
+        data["page_name"] = "{library12}-{upstream12}{vendor}{dirty}"
+        path.write_text(_yaml.safe_dump(data, sort_keys=False))
+        descriptor.set_root(self.root)
+        text = gen_index.render([], [], {"library": "a" * 40, "upstream": "b" * 40}, "none")
+        self.assertIn("- Reference fork revision", text)
+        self.assertIn("fork revision, upstream revision,", text)
+        self.assertNotIn("library revision", text)
+
     def test_compare_runs(self):
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
