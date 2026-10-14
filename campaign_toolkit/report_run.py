@@ -172,12 +172,7 @@ def render(manifest, suite, rows, run_dir):
                                    for t, c in sorted(manifest["threads"]["cpu_sets"].items(),
                                                       key=lambda kv: int(kv[0]))),
         "",
-        f"Every row below passed `{d.measured['binary']} verify` on the same grid before timing: the",
-        "providers' factorizations are checked against each provider's documented convention",
-        "(reconstruction, orthonormality, residuals), not against each other's floating-point",
-        "output. Times are milliseconds, the best wall time per case and engine row; with more",
-        "than one complete set repeat the table shows the best repeat, and the A/A spread is",
-        "reported at its foot.",
+        *d.verify_note().replace("{binary}", d.measured["binary"]).splitlines(),
         "",
     ]
     for population in manifest["run_spec"]["populations"]:

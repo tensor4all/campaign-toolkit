@@ -24,6 +24,16 @@ SCHEMA_RELPATH = "schemas/campaign.schema.json"
 # not say: the shape, the batch and the engine row, at the thread budget.
 DEFAULT_CASE_LABEL = "`{family}/{dims}/b{batch}` @{threads}T {row}"
 
+# The paragraph a report prints above its tables about what the harness's `verify` pass
+# established, when the campaign's descriptor does not say. It is a campaign's own
+# account of its harness, so a campaign with different checks states it in `report`.
+DEFAULT_VERIFY_NOTE = """Every row below passed `{binary} verify` on the same grid before timing: the
+providers' factorizations are checked against each provider's documented convention
+(reconstruction, orthonormality, residuals), not against each other's floating-point
+output. Times are milliseconds, the best wall time per case and engine row; with more
+than one complete set repeat the table shows the best repeat, and the A/A spread is
+reported at its foot."""
+
 _current: "Descriptor | None" = None
 
 
@@ -178,6 +188,10 @@ class Descriptor:
     @property
     def case_label(self) -> str:
         return self.data.get("case_label") or DEFAULT_CASE_LABEL
+
+    def verify_note(self) -> str:
+        """The report paragraph about the harness's verify pass, wrapped as the page prints it."""
+        return self.data["report"].get("verify_note") or DEFAULT_VERIFY_NOTE
 
     # ---- measurement ----------------------------------------------------
     @property

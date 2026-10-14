@@ -336,6 +336,11 @@
           "type": "string",
           "minLength": 1
         },
+        "verify_note": {
+          "description": "The paragraph a report prints above its tables about what the harness's `verify` pass established, as a literal block scalar: one line per output line. Token: {binary}. Defaults to the wording of the first campaign extracted.",
+          "type": "string",
+          "minLength": 1
+        },
         "index_generator": {
           "type": "string",
           "minLength": 1
