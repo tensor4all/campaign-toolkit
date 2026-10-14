@@ -270,6 +270,20 @@
         "minLength": 1
       }
     },
+    "case_axes": {
+      "description": "CSV columns, beyond regime/family/dtype/shape/batch/row/threads, that identify a cell. A declared axis is part of the key a report table and a comparison are grouped by -- two values are two cells and are never pooled -- and it is printed in the case label and in each report section heading. `k`, the third index of a three-index shape, is read from the CSV whenever the column is declared and needs no entry here.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "case_label": {
+      "description": "Template naming one cell in a report table and in a comparison. Tokens: {regime} {family} {dtype} {dims} {batch} {row} {threads}, plus each name in `case_axes`. Defaults to the shape of an un-axed campaign: `` `{family}/{dims}/b{batch}` @{threads}T {row} ``.",
+      "type": "string",
+      "minLength": 1
+    },
     "page_name": {
       "description": "Template naming a published page. Tokens: {library12} {upstream12} {version} {vendor} {dirty}. For example `{library12}{version}{vendor}{dirty}` for one measured revision, or `{library12}-{upstream12}{vendor}{dirty}` when a baseline is recorded too.",
       "type": "string",
@@ -296,6 +310,21 @@
       "additionalProperties": false,
       "properties": {
         "library_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "library_version_label": {
+          "description": "Label of the line that prints the measured revision's own version, when the manifest records one. Omitted when the measured library carries no release version of its own.",
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream_label": {
+          "description": "Label of the line that prints the baseline revision, when the descriptor records a second identity.",
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream_ref_label": {
+          "description": "Label of the line that prints the ref and version the baseline revision was pinned by, so the pin reads as a release and not only as a hash.",
           "type": "string",
           "minLength": 1
         },

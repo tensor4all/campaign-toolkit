@@ -35,6 +35,14 @@ def check(root, out=None) -> list:
             continue
         groups = set(suite["family_groups"])
         for spec in suite["runs"]:
+            # A regime is a *population's* identity, not a bare shape class: the harness's raw-data
+            # file names, its skip keys and the report's tables are all keyed by it, so two
+            # populations under one label would overwrite each other's evidence.
+            regimes = [p["regime"] for p in spec["populations"]]
+            duplicates = sorted({r for r in regimes if regimes.count(r) > 1})
+            if duplicates:
+                problems.append(f"{path}: regime label(s) {duplicates} name more than one "
+                                f"population; a regime is a population identity")
             for population in spec["populations"]:
                 unknown = set(population["groups"]) - groups
                 if unknown:

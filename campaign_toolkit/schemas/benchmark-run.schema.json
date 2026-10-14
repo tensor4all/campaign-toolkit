@@ -460,11 +460,11 @@
                 "minItems": 1
               },
               "n": {
-                "description": "Matrix dimensions: `N` for square, `MxN` for rectangular.",
+                "description": "Matrix dimensions: `N` for square, `MxN` for rectangular, `MxKxN` for a three-index operation such as a multiply-accumulate, which cannot be written as two.",
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "pattern": "^[0-9]+(x[0-9]+)?$"
+                  "pattern": "^[0-9]+(x[0-9]+){0,2}$"
                 },
                 "minItems": 1
               },
@@ -488,6 +488,15 @@
           }
         },
         "dtypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "order": {
+          "description": "The extra declared axis this run covered, when the harness measures one (the memory order, `c`/`f`). It is part of a cell's identity, so it is recorded, and the declaration is read back rather than the harness command.",
           "type": "array",
           "items": {
             "type": "string",

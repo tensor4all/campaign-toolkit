@@ -21,8 +21,8 @@ TOOLKIT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TOOLKIT))
 
 from campaign_toolkit import (  # noqa: E402
-    compare_runs, descriptor, gen_index, publish_report, report_run, union_index,
-    validate_run,
+    campaign, compare_runs, descriptor, gen_index, jsonschema_lite, publish_report,
+    report_run, union_index, validate_run,
 )
 
 FIXTURE = TOOLKIT / "tests/fixture"
@@ -146,6 +146,39 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertIn("- Reference fork revision", text)
         self.assertIn("fork revision, upstream revision,", text)
         self.assertNotIn("library revision", text)
+
+    def test_declared_case_axes_split_cells(self):
+        # A campaign that declares an extra CSV axis must not pool two values of it: the cell
+        # key carries the axis, so two orders are two cells, and a three-index shape keeps its
+        # `k` rather than being read as a rectangle.
+        import yaml as _yaml
+        path = self.root / "benchmarks/campaign.yaml"
+        data = _yaml.safe_load(path.read_text())
+        data["case_axes"] = ["order"]
+        data["case_label"] = "`{family}/{dims}/b{batch}` {order} {threads}T {row}"
+        data["csv_columns"] = data["csv_columns"][:3] + ["order"] + data["csv_columns"][3:] + ["k"]
+        path.write_text(_yaml.safe_dump(data, sort_keys=False))
+        descriptor.set_root(self.root)
+        row = dict(regime="r", family="f", dtype="f64", order="c", m="4", n="4", k="",
+                   batch="1", row="algo-lane", threads="1")
+        cell = campaign.cell_of(row)
+        self.assertEqual(campaign.case_label(cell), "`f/n4/b1` c 1T algo-lane")
+        self.assertNotEqual(cell, campaign.cell_of(dict(row, order="f")))
+        gemm = campaign.cell_of(dict(row, m="4096", n="240", k="16"))
+        self.assertEqual(campaign.case_dims(gemm.m, gemm.n, gemm.k), "4096x16x240")
+        self.assertIn("4096x16x240", campaign.case_label(gemm))
+
+    def test_run_schema_takes_a_declared_axis_and_a_three_index_shape(self):
+        # The manifest schema has to accept what a dual-identity, order-axed campaign records:
+        # an `order` on the run spec, and a three-index shape in a population's grid.
+        import json
+        import yaml as _yaml
+        schema = json.loads((TOOLKIT / "campaign_toolkit/schemas/benchmark-run.schema.json")
+                            .read_text())
+        manifest = _yaml.safe_load((self.root / RUN_A_REL / "run.yaml").read_text())
+        manifest["run_spec"]["order"] = ["c", "f"]
+        manifest["run_spec"]["populations"][0]["n"] = ["4x4x4"]
+        jsonschema_lite.validate(manifest, schema)
 
     def test_compare_runs(self):
         buffer = io.StringIO()

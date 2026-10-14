@@ -8,12 +8,13 @@ into a discussion without its commit is the thing this repository exists to stop
 """
 import argparse
 import csv
+import itertools
 import pathlib
 import statistics
 import sys
 
 from . import descriptor
-from .campaign import load, provider_of
+from .campaign import case_dims, load, provider_of
 
 
 def columns():
@@ -43,15 +44,21 @@ def read_rows(csv_paths):
 
 
 def case_name(row):
-    shape = f"n{row['n']}" if row["m"] == row["n"] else f"{row['m']}x{row['n']}"
+    shape = case_dims(int(row["m"]), int(row["n"]), row.get("k", ""))
     return f"{row['family']}/{shape}/b{row['batch']}"
 
 
 def best_per_case(rows):
-    """(case, dtype, threads) -> engine row -> (best ms, spread), skipped cases."""
+    """(regime, case, dtype, *axes, threads) -> engine row -> times, and skipped cases.
+
+    A declared case axis is part of the key, so a cell of one order is never pooled with
+    the same shape of another.
+    """
+    axes = descriptor.current().case_axes
     best, skipped = {}, {}
     for row in rows:
-        key = (row["regime"], case_name(row), row["dtype"], int(row["threads"]))
+        key = (row["regime"], case_name(row), row["dtype"],
+               *(row[a] for a in axes), int(row["threads"]))
         if row["status"] == "skipped":
             skipped.setdefault((row["regime"], int(row["threads"])), set()).add(
                 f"{row['family']}/{row['m']}x{row['n']}")
@@ -79,7 +86,10 @@ def render(manifest, suite, rows, run_dir):
     d = descriptor.current()
     report = d.report
     vendor = manifest.get("vendor") or {}
-    deps = [p for p in manifest.get("providers", []) if p["name"] in d.provider_packages]
+    library = manifest["library"]
+    upstream = manifest.get("upstream") or {}
+    deps = ([p for p in manifest.get("providers", []) if p["name"] in d.provider_packages]
+            or [p for p in manifest.get("providers", []) if p["name"] in d.measured_providers])
     engines = manifest["run_spec"]["engines"]
     # The columns are the engines this run recorded measuring, in the declaration's order: a page
     # prints the arms it has, and a vendor arm has one LAPACK row because one binary links one
@@ -89,9 +99,18 @@ def render(manifest, suite, rows, run_dir):
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
-        f"- {report['library_label']}: `{manifest['library']['commit']}`"
-        + (" **(dirty)**" if manifest["library"]["dirty"] else ""),
-        f"- features: `{', '.join(manifest['library']['features']) or 'default'}`",
+        f"- {report['library_label']}: `{library['commit']}`"
+        + (" **(dirty)**" if library["dirty"] else ""),
+        # A campaign that records a baseline says so above its tables: a page naming one
+        # revision of a two-library comparison cannot be read as a one-variable result.
+        *([f"- {report['library_version_label']}: `{library['version'] or '-'}`"]
+          if report.get("library_version_label") else []),
+        *([f"- {report['upstream_label']}: `{upstream.get('commit') or '-'}`"
+           + (" **(dirty)**" if upstream.get("dirty") else ""),
+           f"- {report['upstream_ref_label']}: `{upstream.get('ref') or '-'}` / "
+           f"`{upstream.get('version') or '-'}`"]
+          if report.get("upstream_label") else []),
+        f"- features: `{', '.join(library['features']) or 'default'}`",
         *([f"- {report['provider_label']}: " + "; ".join(provider_text(p) for p in deps)] if deps else []),
         f"- {report['harness_label']}: `{manifest['harness']['commit']}`",
         f"- hardware profile: `{manifest['target_profile']}`",
@@ -124,7 +143,8 @@ def render(manifest, suite, rows, run_dir):
         if doc.get("caveat"):
             out.append(f"    Caveat: {doc['caveat']}")
         if provider_of(engine) in d.measured_providers and deps:
-            out.append("    As measured: " + "; ".join(provider_text(p) for p in deps))
+            own = [p for p in deps if p["name"] == provider_of(engine)]
+            out.append("    As measured: " + "; ".join(provider_text(p) for p in (own or deps)))
         if engine == f"lapack-{vendor.get('name')}":
             # From the identity the harness read out of the library it linked, never from the arm
             # that was requested.
@@ -162,29 +182,53 @@ def render(manifest, suite, rows, run_dir):
     ]
     for population in manifest["run_spec"]["populations"]:
         regime = population["regime"]
+        # A regime can carry more than one population (two shape grids cannot share one), and
+        # both are labelled with the same regime in the CSV, so the cases are narrowed to this
+        # population's families rather than to the whole regime.
+        families = set(population["families"])
+        # A declared axis is taken from what the run recorded; a manifest that predates the
+        # axis still gets its tables split by what its rows actually carry, so two values of
+        # an axis are never pooled into one table.
+        axis_values_lists = [(manifest["run_spec"].get(axis) or sorted({row[axis] for row in rows}))
+                             for axis in d.case_axes]
         for dtype in manifest["run_spec"]["dtypes"]:
-            for threads in manifest["threads"]["counts"]:
-                cases = sorted({k[1] for k in best if k[0] == regime and k[2] == dtype
-                                and k[3] == threads})
-                if not cases:
-                    continue
-                out.append(f"## {regime}, {dtype}, {threads}T "
-                           f"(CPU {manifest['threads']['cpu_sets'].get(str(threads), '?')})")
-                out.append("")
-                out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names) + " |")
-                out.append("|" + "---|" * (len(row_names) + 1))
-                for case in cases:
-                    cells = []
-                    for engine in row_names:
-                        times = best.get((regime, case, dtype, threads), {}).get(engine, [])
-                        cells.append(f"{min(times):.4f}" if times else "-")
-                    out.append(f"| `{case}` | " + " | ".join(cells) + " |")
-                out.append("")
-                if threads in [t for (r, t) in skipped if r == regime]:
-                    cases_skipped = sorted(skipped[(regime, threads)])
-                    out.append(f"Not applicable to these shapes and reported as skipped: "
-                               f"{', '.join('`' + c + '`' for c in cases_skipped)}.")
+            for axis_values in itertools.product(*axis_values_lists):
+                for threads in manifest["threads"]["counts"]:
+                    section = ", ".join([regime, dtype]
+                                        + [f"{v} {a}" for v, a in zip(axis_values, d.case_axes)]
+                                        + [f"{threads}T"])
+                    head = 3 + len(axis_values)
+                    cases = sorted({k[1] for k in best
+                                    if k[0] == regime and k[2] == dtype
+                                    and k[3:head] == axis_values and k[head] == threads
+                                    and k[1].split("/")[0] in families})
+                    if not cases:
+                        continue
+                    out.append(f"## {section} "
+                               f"(CPU {manifest['threads']['cpu_sets'].get(str(threads), '?')})")
                     out.append("")
+                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names) + " |")
+                    out.append("|" + "---|" * (len(row_names) + 1))
+                    for case in cases:
+                        cells = []
+                        for engine in row_names:
+                            key = (regime, case, dtype, *axis_values, threads)
+                            times = best.get(key, {}).get(engine, [])
+                            cells.append(f"{min(times):.4f}" if times else "-")
+                        out.append(f"| `{case}` | " + " | ".join(cells) + " |")
+                    out.append("")
+                    if not population.get("skipped") and threads in [t for (r, t) in skipped
+                                                                     if r == regime]:
+                        cases_skipped = sorted(skipped[(regime, threads)])
+                        out.append(f"Not applicable to these shapes and reported as skipped: "
+                                   f"{', '.join('`' + c + '`' for c in cases_skipped)}.")
+                        out.append("")
+        # A run that recorded its skips records them once for the population, and that record is
+        # what the page quotes: it is what the harness reported, not a re-reading of its CSVs.
+        if population.get("skipped"):
+            out.append(f"Not applicable to this population's shapes and reported as skipped: "
+                       f"{', '.join('`' + c + '`' for c in population['skipped'])}.")
+            out.append("")
     if manifest["run_spec"]["aa"] > 1:
         spreads = []
         for key, per_row in best.items():

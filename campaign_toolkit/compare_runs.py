@@ -29,6 +29,7 @@ import statistics
 import sys
 
 from . import descriptor
+from .campaign import case_label, cell_of
 
 
 def columns():
@@ -64,16 +65,12 @@ def read(run_dir: pathlib.Path):
                     sys.exit(f"{path}: missing columns {missing}")
                 if row["status"] != "ok":
                     continue
-                key = (row["regime"], row["family"], row["dtype"], int(row["m"]),
-                       int(row["n"]), int(row["batch"]), row["row"], int(row["threads"]))
-                cells.setdefault(key, []).append(float(row["total_ms"]))
+                cells.setdefault(cell_of(row), []).append(float(row["total_ms"]))
     return cells, len(repeats), manifest
 
 
 def shape(key) -> str:
-    _, family, _, m, n, batch, row, threads = key
-    dims = f"n{n}" if m == n else f"{m}x{n}"
-    return f"`{family}/{dims}/b{batch}` @{threads}T {row}"
+    return case_label(key)
 
 
 def aggregate(pairs):
@@ -85,8 +82,7 @@ def aggregate(pairs):
     """
     groups: dict[tuple, list[float]] = {}
     for key, ratio in pairs:
-        _, family, dtype, _, _, _, row, threads = key
-        groups.setdefault((family, row, threads, dtype), []).append(ratio)
+        groups.setdefault((key.family, key.row, key.threads, key.dtype), []).append(ratio)
     return groups
 
 
@@ -118,12 +114,24 @@ def main(argv=None, root=None) -> int:
                  f"with the previous revision recorded for the same arm, and compare the arms by "
                  f"reading their pages side by side.")
 
+    # A ratio is only a revision comparison when the thing that changed is the thing under
+    # test. The measured library is expected to differ; if two runs were taken against
+    # different baselines, or by different harnesses, the change measured is a different one
+    # and the table would silently attribute it to the measured library.
+    for what in ("upstream", "harness"):
+        b = (before_manifest.get(what) or {}).get("commit")
+        a = (after_manifest.get(what) or {}).get("commit")
+        if b != a:
+            sys.exit(f"ERROR: the two runs were taken against different {what} revisions "
+                     f"({b!r} and {a!r}); that difference is part of what the ratio would "
+                     f"measure, so it is not a one-variable comparison.")
+
     wanted = set(args.families.split(",")) if args.families else None
     keys = sorted(set(before) & set(after))
     if wanted:
-        keys = [k for k in keys if k[1] in wanted]
+        keys = [k for k in keys if k.family in wanted]
     if args.threads:
-        keys = [k for k in keys if k[7] == int(args.threads)]
+        keys = [k for k in keys if k.threads == int(args.threads)]
 
     print(f"# {args.before} -> {args.after}")
     print()

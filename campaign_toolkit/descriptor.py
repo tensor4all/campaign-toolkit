@@ -20,6 +20,10 @@ from . import jsonschema_lite
 DEFAULT_RELPATH = "benchmarks/campaign.yaml"
 SCHEMA_RELPATH = "schemas/campaign.schema.json"
 
+# How a cell is named in a report table and in a comparison when the descriptor does
+# not say: the shape, the batch and the engine row, at the thread budget.
+DEFAULT_CASE_LABEL = "`{family}/{dims}/b{batch}` @{threads}T {row}"
+
 _current: "Descriptor | None" = None
 
 
@@ -165,6 +169,15 @@ class Descriptor:
     @property
     def page_name(self) -> str:
         return self.data["page_name"]
+
+    @property
+    def case_axes(self) -> tuple:
+        """CSV columns that identify a cell beyond family/shape/batch/row/threads."""
+        return tuple(self.data.get("case_axes", []))
+
+    @property
+    def case_label(self) -> str:
+        return self.data.get("case_label") or DEFAULT_CASE_LABEL
 
     # ---- measurement ----------------------------------------------------
     @property

@@ -26,8 +26,10 @@ project (name, url, pin file, checkout, build script, binary, the feature per
 vendor arm), which revisions a run records (`identities: [library]` or
 `[library, upstream]`), the profiles/suites/data/result directories, the engine
 name -> provider map, the vendor providers, the published-page name template, the
-default invalidated paths, the CSV columns, and the strings the index and report
-headers print. The package itself holds no campaign's specifics.
+default invalidated paths, the CSV columns (and, for a campaign whose harness measures
+one, the extra `case_axes` that identify a cell and the `case_label` a report and a
+comparison print it as), and the strings the index and report headers print. The package
+itself holds no campaign's specifics.
 
 A campaign's entry points are its `scripts/*.py` shims:
 

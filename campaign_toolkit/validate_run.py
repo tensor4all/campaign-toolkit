@@ -137,10 +137,14 @@ def check_declaration(manifest, suite, spec, errors):
             if batch not in want["batch"]:
                 errors.append(f"run_spec.populations[{population['regime']}] contains batch "
                               f"{batch!r}, which the suite does not declare for that regime")
+    declared_engines = engines_for_vendor(suite, vendor_of_engines(rs.get("engines", [])) or "")
+    # A declared axis (`order`, in the campaigns that declare one) is checked the same way as
+    # the dtype list: a value the suite does not declare is not part of any cell.
     for key, declared_values in (("dtypes", spec["dtypes"]),
-                                 ("engines", engines_for_vendor(suite,
-                                                                 vendor_of_engines(rs.get("engines", []))
-                                                                 or ""),)):
+                                 ("order", spec.get("order")),
+                                 ("engines", declared_engines)):
+        if declared_values is None:
+            continue
         for v in rs.get(key, []):
             if v not in declared_values:
                 errors.append(f"run_spec.{key} contains {v!r}, which the suite does not declare "
@@ -148,7 +152,8 @@ def check_declaration(manifest, suite, spec, errors):
     covers = (same_populations(covered, populations(suite))
               and manifest["threads"]["counts"] == spec["threads"]
               and rs.get("dtypes") == spec["dtypes"]
-              and rs.get("engines") == engines_for_vendor(suite, vendor_of_engines(rs.get("engines", []))))
+              and rs.get("order", []) == spec.get("order", [])
+              and rs.get("engines") == declared_engines)
     if rs.get("covers_declared_suite") != covers:
         errors.append(f"run_spec.covers_declared_suite should be {covers}")
 

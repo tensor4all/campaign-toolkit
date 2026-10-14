@@ -155,19 +155,23 @@ def lock_providers(lock_path):
 def providers_for(engines, vendor, deps=()):
     """The providers and vendor library this run was measured against.
 
-    The measured provider's entry names the revision the library block above
-    already records. The vendor entry is written from the identity the harness
-    read out of the linked library, never from the arm that was requested: the
-    point of reading it back is that the manifest records what was linked rather
-    than what was asked for.
+    One entry per measured provider the run's engines name, then the measured provider's linked
+    dependencies, then the vendor. A campaign that records a baseline has two measured
+    providers, and a manifest that named only one of them would lose that library's identity.
+    The vendor entry is written from the identity the harness read out of the linked library,
+    never from the arm that was requested: the point of reading it back is that the manifest
+    records what was linked rather than what was asked for.
     """
     d = descriptor.current()
     out = []
     names = {provider_of(e) for e in engines}
-    if set(d.measured_providers) & names:
-        measured_name = next(p for p in d.measured_providers if p in names)
+    where = "library and upstream" if d.has_upstream else "library"
+    for measured_name in d.measured_providers:
+        if measured_name not in names:
+            continue
         out.append({"name": measured_name, "version": None, "commit": None, "path": None,
-                    "note": "the provider in the measured revision; see library above"})
+                    "note": f"the provider in the measured revision; see {where} above"})
+    if set(d.measured_providers) & names:
         out.extend(deps)
     for provider in vendor_engines(engines):
         if vendor.get("vendor.name") != provider:
@@ -279,6 +283,9 @@ def main(argv=None, root=None):
         covered = [p for p in covered if p["families"]]
     threads = [int(t) for t in args.threads.split(",")] if args.threads else spec["threads"]
     dtypes = args.dtypes.split(",") if args.dtypes else spec["dtypes"]
+    # A declared case axis -- the memory order, in the campaigns that declare one. It is part
+    # of a cell's identity, so it is recorded and it is part of the coverage comparison.
+    order = spec.get("order", [])
     arms = vendor_engines(spec["engines"])
     if args.vendor:
         arm = args.vendor
@@ -330,7 +337,7 @@ def main(argv=None, root=None):
     run_dir = d.data_dir / args.profile / args.suite_id / name
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    bin_dir = pathlib.Path(pin["BIN_DIR"])
+    bin_dir = pathlib.Path(pin[pin_env.get("bin_dir", "BIN_DIR")])
     binary = bin_dir / d.measured["binary"]
     pinned = protocol_script(checkout, "pinned.sh")
     idle = protocol_script(checkout, "idle_cpus.py")
@@ -422,10 +429,10 @@ def main(argv=None, root=None):
             "dirty": dirty,
             "features": [f for f in pin[pin_env["features"]].split(",") if f],
             "measured_path": pin[pin_env["dir"]],
-            "version": None,
+            "version": (pin.get(pin_env["version"]) if pin_env.get("version") else None) or None,
         },
         **({"upstream": upstream_block} if upstream_block else {}),
-        "vendor": vendor_block(identity, pin.get("BUILD_ENV")),
+        "vendor": vendor_block(identity, pin.get(pin_env.get("env", "BUILD_ENV"))),
         "harness": {
             "commit": git(d.root, "rev-parse", "HEAD"),
             "dirty": bool(git(d.root, "status", "--porcelain", "--untracked-files=no")),
@@ -461,10 +468,12 @@ def main(argv=None, root=None):
         "run_spec": {
             "populations": recorded,
             "dtypes": dtypes,
+            **({"order": order} if "order" in spec else {}),
             "engines": engines,
             "aa": args.aa,
             "covers_declared_suite": (threads == spec["threads"]
                                       and dtypes == spec["dtypes"]
+                                      and order == spec.get("order", [])
                                       and engines == engines_for_vendor(suite, arm)
                                       and same_populations(covered, declared)),
         },

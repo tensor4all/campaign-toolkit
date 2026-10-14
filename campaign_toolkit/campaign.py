@@ -8,11 +8,18 @@ would drift. Every campaign-specific value is read from the descriptor.
 """
 from __future__ import annotations
 
+import collections
 import pathlib
 
 import yaml
 
 from . import descriptor
+
+
+# One measured cell, as the harness's CSV and the report and comparison read it. A
+# `Cell` is hashable and sorts in this field order, so it is the key of a comparison.
+# `axes` holds the values of the descriptor's `case_axes`, in declaration order.
+Cell = collections.namedtuple("Cell", "regime family dtype axes m n k batch row threads")
 
 
 def desc() -> descriptor.Descriptor:
@@ -130,6 +137,36 @@ def engines_for_vendor(suite: dict, vendor: str) -> list:
     return out
 
 
+def cell_of(row: dict) -> Cell:
+    """One CSV row as a cell key.
+
+    `k` is read whenever the descriptor declares the column, so a three-index shape is
+    distinguished from a two-index one; it is empty for every other family.
+    """
+    d = desc()
+    k = row.get("k", "") if "k" in d.csv_columns else ""
+    return Cell(row["regime"], row["family"], row["dtype"],
+                tuple(row[axis] for axis in d.case_axes),
+                int(row["m"]), int(row["n"]), k,
+                int(row["batch"]), row["row"], int(row["threads"]))
+
+
+def case_dims(m: int, n: int, k: str = "") -> str:
+    """A shape as a reader writes it: `N` square, `MxN` rectangular, `MxKxN` three-index."""
+    if k:
+        return f"{m}x{k}x{n}"
+    return f"n{n}" if m == n else f"{m}x{n}"
+
+
+def case_label(cell: Cell) -> str:
+    """One cell as the descriptor's `case_label` template renders it."""
+    tokens = {"regime": cell.regime, "family": cell.family, "dtype": cell.dtype,
+              "dims": case_dims(cell.m, cell.n, cell.k), "batch": cell.batch,
+              "row": cell.row, "threads": cell.threads}
+    tokens.update(zip(desc().case_axes, cell.axes))
+    return desc().case_label.format(**tokens)
+
+
 def coverage_of(suite: dict, manifest: dict) -> str:
     """How a run relates to the *current* declaration, by content rather than by hash.
 
@@ -152,11 +189,13 @@ def coverage_of(suite: dict, manifest: dict) -> str:
     if not (subset
             and set(manifest["threads"]["counts"]) <= set(spec["threads"])
             and set(rs.get("dtypes", [])) <= set(spec["dtypes"])
+            and set(rs.get("order", [])) <= set(spec.get("order", []))
             and set(rs.get("engines", [])) <= declared_engines):
         return "declaration-changed"
     full = (same_populations(got, populations(suite))
             and manifest["threads"]["counts"] == spec["threads"]
             and rs.get("dtypes") == spec["dtypes"]
+            and rs.get("order", []) == spec.get("order", [])
             and rs.get("engines") == engines_for_vendor(suite, arm))
     return "full" if full else "partial"
 
