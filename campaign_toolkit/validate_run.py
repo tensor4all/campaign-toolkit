@@ -19,7 +19,7 @@ from .campaign import (engines_for_vendor, find_suite, load, populations,
 
 
 def known_profiles():
-    return {p["name"] for p in load(descriptor.current().profiles_file)["profiles"]}
+    return set(descriptor.current().profile_names())
 
 
 def declaration_drifted(manifest, suite_file):

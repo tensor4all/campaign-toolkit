@@ -117,7 +117,7 @@ def collect():
     appear as `missing` rather than be implied by the other arm's page.
     """
     d = descriptor.current()
-    profiles = [p["name"] for p in load(d.profiles_file)["profiles"]]
+    profiles = d.profile_names()
     suites = [load(f) for f in sorted(d.suites_dir.glob("*.yaml"))]
     references = {identity: reference_rev(d.pin_file(identity)) for identity in d.identities}
     checkouts = {identity: d.checkout_dir(identity) for identity in d.identities}

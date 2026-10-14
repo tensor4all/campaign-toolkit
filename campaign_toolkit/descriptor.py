@@ -41,6 +41,34 @@ class DescriptorError(SystemExit):
     """A missing or invalid descriptor; a campaign cannot run without one."""
 
 
+def profiles_dir() -> pathlib.Path:
+    """Where the toolkit's shared hardware profile library lives.
+
+    A profile is a fact about a machine, not about a campaign, so the library is
+    shared here and a campaign's `benchmarks/profiles.yaml` *names* the profiles
+    it measures. `CAMPAIGN_TOOLKIT_PROFILES` overrides the location.
+    """
+    env = os.environ.get("CAMPAIGN_TOOLKIT_PROFILES")
+    if env:
+        return pathlib.Path(env).resolve()
+    package = pathlib.Path(__file__).resolve().parent
+    for candidate in (package / "profiles", package.parent / "profiles"):
+        if candidate.is_dir():
+            return candidate
+    return package / "profiles"
+
+
+def shared_profile(name: str) -> dict:
+    """One profile from the toolkit's library, by name."""
+    path = profiles_dir() / f"{name}.yaml"
+    if not path.exists():
+        raise DescriptorError(f"ERROR: no shared profile {name!r} in {profiles_dir()}")
+    data = yaml.safe_load(path.read_text())
+    if not isinstance(data, dict):
+        raise DescriptorError(f"ERROR: {path} does not hold a mapping")
+    return data
+
+
 def schemas_dir() -> pathlib.Path:
     """Where the toolkit's JSON Schemas live.
 
@@ -104,6 +132,21 @@ class Descriptor:
     @property
     def profiles_file(self) -> pathlib.Path:
         return self.resolve(self.data["profiles_file"])
+
+    def profiles(self) -> list:
+        """The hardware profiles this campaign measures.
+
+        An entry of `profiles.yaml` is either a mapping -- a machine only this
+        campaign uses -- or a name, resolved against the toolkit's shared library.
+        """
+        declared = yaml.safe_load(self.profiles_file.read_text())
+        out = []
+        for entry in declared["profiles"]:
+            out.append(shared_profile(entry) if isinstance(entry, str) else entry)
+        return out
+
+    def profile_names(self) -> list:
+        return [p["name"] for p in self.profiles()]
 
     @property
     def suites_dir(self) -> pathlib.Path:

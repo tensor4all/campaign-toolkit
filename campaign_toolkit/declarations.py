@@ -21,7 +21,7 @@ def check(root, out=None) -> list:
     d = descriptor.set_root(root)
     problems = []
     schema = json.loads((descriptor.schemas_dir() / "benchmark-suite.schema.json").read_text())
-    profiles = {p["name"] for p in load(d.profiles_file)["profiles"]}
+    profiles = set(d.profile_names())
     engines = set(d.engines)
     suites = sorted(d.suites_dir.glob("*.yaml"))
     if not suites:

@@ -21,7 +21,8 @@ TOOLKIT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TOOLKIT))
 
 from campaign_toolkit import (  # noqa: E402
-    compare_runs, descriptor, gen_index, publish_report, report_run, validate_run,
+    compare_runs, descriptor, gen_index, publish_report, report_run, union_index,
+    validate_run,
 )
 
 FIXTURE = TOOLKIT / "tests/fixture"
@@ -140,7 +141,56 @@ class FixtureCampaignTest(unittest.TestCase):
             descriptor.load_descriptor(bad)
 
 
+    def test_profile_reference_resolves_and_is_used(self):
+        # A campaign opts into a shared profile by naming it; the body comes from
+        # the toolkit, so a corrected profile reaches every campaign that measures it.
+        (self.root / "benchmarks/profiles.yaml").write_text(
+            "schema_version: 1\nprofiles:\n  - zen5-cpu\n")
+        d = descriptor.load_descriptor(self.root)
+        self.assertEqual(d.profile_names(), ["zen5-cpu"])
+        self.assertEqual(d.profiles()[0]["cpu"], "AMD Ryzen AI 9 HX 470")
+
+    def test_union_index_over_one_and_two_campaigns(self):
+        def publish(root):
+            run_a = root / RUN_A_REL
+            self.assertEqual(report_run.main(["--run-dir", str(run_a)], root=root), 0)
+            self.assertEqual(publish_report.main([str(run_a)], root=root), 0)
+            self.assertEqual(gen_index.main(["--write"], root=root), 0)
+
+        publish(self.root)
+        second = pathlib.Path(self.tmp.name) / "campaign2"
+        shutil.copytree(self.root, second)
+        campaign = second / "benchmarks/campaign.yaml"
+        campaign.write_text(campaign.read_text().replace("fixture-campaign", "second-campaign"))
+        publish(second)
+
+        out = pathlib.Path(self.tmp.name) / "union.md"
+        # A campaign root and an already-published INDEX.md are both inputs.
+        rc = union_index.main([str(self.root), str(second / "result/INDEX.md"),
+                               "--out", str(out)])
+        self.assertEqual(rc, 0)
+        text = out.read_text()
+        self.assertIn("| campaign | suite | profile |", text)
+        self.assertIn("| `fixture-campaign` | `fixture-kernels` |", text)
+        self.assertIn("| `second-campaign` | `fixture-kernels` |", text)
+
+        # One campaign is the same code path, not a special case.
+        single = pathlib.Path(self.tmp.name) / "single.md"
+        self.assertEqual(union_index.main([str(self.root), "--out", str(single)]), 0)
+        text = single.read_text()
+        self.assertIn("| `fixture-campaign` |", text)
+        self.assertNotIn("second-campaign", text)
+
+
 class ToolkitRepositoryTest(unittest.TestCase):
+    def test_shared_profile_library(self):
+        profile = descriptor.shared_profile("zen5-cpu")
+        self.assertEqual(profile["name"], "zen5-cpu")
+        self.assertEqual(profile["logical_cpus"], 24)
+        self.assertTrue(descriptor.profiles_dir().is_dir())
+        with self.assertRaises(SystemExit):
+            descriptor.shared_profile("no-such-profile")
+
     def test_package_holds_no_campaign_names(self):
         for path in sorted((TOOLKIT / "campaign_toolkit").rglob("*")):
             if path.suffix not in (".py", ".json"):

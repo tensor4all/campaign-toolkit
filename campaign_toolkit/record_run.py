@@ -261,7 +261,7 @@ def main(argv=None, root=None):
     ap.add_argument("--label", default=None, help="suffix for the run directory")
     args = ap.parse_args(argv)
 
-    profiles = yaml.safe_load(d.profiles_file.read_text())["profiles"]
+    profiles = d.profiles()
     suite = yaml.safe_load(d.suite_path(args.suite_id).read_text())
     spec = suite["runs"][0]
     declared = populations(suite)

@@ -46,7 +46,45 @@ CAMPAIGN_ROOT=/path/to/campaign python3 -m campaign_toolkit.gen_index --check
 Console entry points (`campaign-record-run`, `campaign-validate-run`,
 `campaign-gen-index`, `campaign-publish-report`, `campaign-compare-runs`,
 `campaign-report-run`, `campaign-descriptor`,
-`campaign-validate-declarations`) are declared in `pyproject.toml`.
+`campaign-validate-declarations`, `campaign-union-index`) are declared in
+`pyproject.toml`.
+
+## Hardware profiles
+
+A profile is a fact about a machine, not about a campaign, so the library lives
+here (`campaign_toolkit/profiles/<name>.yaml`) and a campaign names the profiles
+it measures in `benchmarks/profiles.yaml`:
+
+```yaml
+schema_version: 1
+profiles:
+  - zen5-cpu                 # resolved from the toolkit
+  - name: some-one-off       # or declared inline, for a machine only this campaign uses
+    cpu: ...
+    logical_cpus: 8
+    l3: "0-7: 8 MiB shared"
+```
+
+Editing a shared profile therefore reaches every campaign that measures it; the
+run manifest still records what the host actually reported, so a recorded run is
+unaffected by a later profile edit.
+
+## The union index
+
+`campaign-union-index` reads several campaigns and writes one index across them,
+keyed by `(campaign, suite, profile, revision, vendor)`:
+
+```bash
+campaign-union-index /path/to/tlinalg-benchmark /path/to/faer-benchmark --out union.md
+campaign-union-index /path/to/faer-benchmark/result/INDEX.md --out union.md
+```
+
+Each input is a campaign root or the path to its published `result/INDEX.md`; a
+root is read through its own index, so both take the same code path, and one
+campaign is the same code path as several. The currency in the output is the
+currency each campaign already computed against *its own* pins and
+`invalidated_by` paths — this command re-derives no number. Each row links back
+to the campaign's page and to the campaign's own index.
 
 ## Layout
 
@@ -54,6 +92,7 @@ Console entry points (`campaign-record-run`, `campaign-validate-run`,
 |---|---|
 | `campaign_toolkit/` | the package: the entry points and `descriptor.py`, `campaign.py`, `jsonschema_lite.py`, `declarations.py` |
 | `campaign_toolkit/schemas/` | the packaged copies of the schemas, used at runtime and by an installed wheel |
+| `campaign_toolkit/profiles/` | the shared hardware profile library a campaign opts into by name |
 | `schemas/` | the same schemas for review; a test fails if the two copies differ |
 | `benchmarks/scripts/` | the pinned, idle-checked timing protocol, copied from the measured library |
 | `tests/fixture/` | a synthetic campaign: declarations and two runs, no build |

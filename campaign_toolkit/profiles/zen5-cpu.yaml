@@ -1,0 +1,16 @@
+# A hardware profile: a machine (or a well-defined container on one) whose cells
+# are only comparable with each other. A profile is a fact about a machine, not
+# about a campaign, so the library lives here and a campaign's
+# `benchmarks/profiles.yaml` names the ones it measures. Adding a profile is a
+# deliberate act: an unknown profile in a run manifest is a schema error, not a
+# warning.
+name: zen5-cpu
+description: >-
+  AMD Ryzen AI 9 HX 470 (Zen5 mobile APU), 12 physical / 24 logical cores.
+  Heterogeneous L3: CPUs 0-3 share 16 MiB, CPUs 4-11 share 8 MiB, so a
+  thread set must be stated together with the domain it sits in. SMT
+  siblings of CPUs 4-11 are 16-23; the idle gate checks them too, because a
+  busy sibling contends with the physical core being measured.
+cpu: AMD Ryzen AI 9 HX 470
+logical_cpus: 24
+l3: "0-3: 16 MiB shared; 4-11: 8 MiB shared"

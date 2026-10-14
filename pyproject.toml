@@ -21,12 +21,13 @@ campaign-compare-runs = "campaign_toolkit.compare_runs:main"
 campaign-report-run = "campaign_toolkit.report_run:main"
 campaign-descriptor = "campaign_toolkit.campaign:main"
 campaign-validate-declarations = "campaign_toolkit.declarations:main"
+campaign-union-index = "campaign_toolkit.union_index:main"
 
 [tool.setuptools]
 packages = ["campaign_toolkit"]
 
 [tool.setuptools.package-data]
-campaign_toolkit = ["schemas/*.json"]
+campaign_toolkit = ["schemas/*.json", "profiles/*.yaml"]
 
 [tool.ruff]
 line-length = 120
