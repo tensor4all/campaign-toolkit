@@ -24,41 +24,53 @@ import pathlib
 import re
 import sys
 
-import yaml
+from . import descriptor
 
 PAGE_LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
-REFERENCE = re.compile(r"^- Reference (upstream )?revision \(`([^`]+)`\): `([^`]+)`")
+# "fork revision" is the wording a dual-identity campaign publishes for its
+# measured revision; "upstream revision" is its baseline.
+REFERENCE = re.compile(r"^- Reference (?:(fork|upstream) )?revision \(`([^`]+)`\): `([^`]+)`")
+
+
+def descriptor_of(path) -> "descriptor.Descriptor | None":
+    """The descriptor of the campaign an input names, when it is still there.
+
+    A published index can outlive the tree it was generated from, so both the
+    index path and the campaign's `id` come from the descriptor when it exists
+    and from the conventional layout when it does not.
+    """
+    path = pathlib.Path(path).resolve()
+    for root in ([path] if path.is_dir() else path.parents):
+        if (root / "benchmarks/campaign.yaml").exists():
+            try:
+                return descriptor.load_descriptor(root)
+            except SystemExit:
+                return None
+    return None
 
 
 def index_path_of(path) -> pathlib.Path:
     """The published `result/INDEX.md` an input names.
 
-    A campaign root resolves to `<root>/result/INDEX.md`; a file is taken as it
-    is. `result_dir` is the convention this reads; an explicit file path always
-    works when a campaign has moved it.
+    A campaign root resolves through its descriptor's `result_dir`; a file is
+    taken as it is. When the descriptor is absent, `<root>/result/INDEX.md` is
+    the convention, and an explicit file path always works.
     """
     path = pathlib.Path(path)
     if path.is_dir():
+        campaign = descriptor_of(path)
+        if campaign is not None:
+            return campaign.index_path
         return path / "result/INDEX.md"
     return path
 
 
 def campaign_id(index: pathlib.Path) -> str:
-    """The `id` a campaign declares, or the repository directory's name.
-
-    A published index can outlive the tree it was generated from, so the
-    descriptor is used when it is there and the directory name when it is not.
-    """
-    root = index.resolve().parent.parent
-    descriptor = root / "benchmarks/campaign.yaml"
-    if descriptor.exists():
-        try:
-            data = yaml.safe_load(descriptor.read_text())
-            if isinstance(data, dict) and data.get("id"):
-                return data["id"]
-        except yaml.YAMLError:
-            pass
-    return root.name
+    """The `id` a campaign declares, or the repository directory's name."""
+    campaign = descriptor_of(index)
+    if campaign is not None:
+        return campaign["id"]
+    return index.resolve().parent.parent.name
 
 
 def parse_table(lines: list) -> list:
@@ -90,7 +102,7 @@ def parse_index(index: pathlib.Path) -> dict:
     for line in index.read_text().splitlines():
         match = REFERENCE.match(line)
         if match:
-            reference["upstream" if match.group(1) else "library"] = match.group(3)
+            reference["upstream" if match.group(1) == "upstream" else "library"] = match.group(3)
             continue
         if line.startswith("## "):
             section = line[3:].strip()
@@ -104,18 +116,15 @@ def parse_index(index: pathlib.Path) -> dict:
             continue
         link = PAGE_LINK.search(raw["page"])
         target = (index.parent / link.group(2)).resolve() if link else None
+        # A dual-identity campaign publishes its revision as `fork/upstream`; that
+        # whole string is the page's identity, so it stays one value here.
         revision = raw.get("revision", raw.get("fork/upstream", "")).strip("`")
-        upstream = raw.get("upstream", "").strip("`")
-        if "/" in revision:
-            revision, _, embedded = revision.partition("/")
-            upstream = embedded if embedded != "-" else ""
         rows.append(dict(
-            campaign=campaign, index=index.resolve(),
-            reference=reference,
+            campaign=campaign,
             suite=raw.get("suite", "").strip("`"),
             profile=raw.get("profile", "").strip("`"),
             vendor=("" if raw.get("vendor", "-") == "-" else raw.get("vendor", "").strip("`")),
-            revision=revision, upstream="" if upstream == "-" else upstream,
+            revision=revision,
             version=("" if raw.get("version", "-") == "-" else raw.get("version", "")),
             date=raw.get("date", ""), coverage=raw.get("coverage", ""),
             status=raw.get("status", ""),
@@ -173,15 +182,15 @@ def render(campaigns: list, rows: list, out_dir) -> str:
         "",
         "Every published page, keyed by `(campaign, suite, profile, revision, vendor)`.",
         "",
-        "| campaign | suite | profile | vendor | revision | upstream | version | date | coverage | status | page |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| campaign | suite | profile | vendor | revision | version | date | coverage | status | page |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
-    for row in sorted(rows, key=lambda r: (key_of(r), r["date"], r["upstream"])):
+    for row in sorted(rows, key=lambda r: (key_of(r), r["date"])):
         vendor = f"`{row['vendor']}`" if row["vendor"] else "-"
         page = f"[{row['page']}]({link_to(row['target'], row['relative'], out_dir)})"
         out.append(
             f"| `{row['campaign']}` | `{row['suite']}` | `{row['profile']}` | {vendor} | "
-            f"`{row['revision']}` | `{row['upstream'] or '-'}` | {row['version'] or '-'} | "
+            f"`{row['revision']}` | {row['version'] or '-'} | "
             f"{row['date']} | {row['coverage']} | {row['status']} | {page} |")
     out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
@@ -211,10 +220,12 @@ def main(argv=None):
     newest = {}
     for row in rows:
         current = newest.get(key_of(row))
-        if current is None or (row["date"], row["upstream"]) > (current["date"], current["upstream"]):
+        if current is None or (row["date"], row["revision"]) > (current["date"], current["revision"]):
             newest[key_of(row)] = row
-    text = render(parsed, list(newest.values()),
-                  pathlib.Path(args.out).resolve().parent if args.out else None)
+    # A stdout index is linked as if it had been saved in the working directory,
+    # which is where a redirected one lands.
+    base = pathlib.Path(args.out).resolve().parent if args.out else pathlib.Path.cwd()
+    text = render(parsed, list(newest.values()), base)
 
     if args.out:
         pathlib.Path(args.out).write_text(text)

@@ -226,6 +226,34 @@ class ToolkitRepositoryTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             descriptor.shared_profile("no-such-profile")
 
+    def test_union_index_keeps_both_identities_of_a_dual_page(self):
+        # A dual-identity campaign names a page by `fork/upstream`; two pages that
+        # share the fork and the vendor differ only by upstream, so the whole string
+        # is the identity and neither page may be dropped.
+        root = pathlib.Path(tempfile.mkdtemp()) / "dual"
+        index = root / "result/INDEX.md"
+        index.parent.mkdir(parents=True)
+        index.write_text(
+            "# Result index\n\n"
+            "- Reference fork revision (`pins/fork.rev`): `aaaaaaaaaaaa`\n"
+            "- Reference upstream revision (`pins/up.rev`): `v1`\n"
+            "- Newest recorded run: `2026-01-01`\n\n"
+            "## All pages\n\n"
+            "| suite | profile | vendor | fork/upstream | version | date | coverage | status | page |\n"
+            "|---|---|---|---|---|---|---|---|---|\n"
+            "| `kernels` | `cpu` | `mkl` | `aaaaaaaaaaaa/bbbbbbbbbbbb` | - | 2026-01-01 "
+            "| full | current | [result/cpu/kernels/a-b-mkl.md](cpu/kernels/a-b-mkl.md) |\n"
+            "| `kernels` | `cpu` | `mkl` | `aaaaaaaaaaaa/cccccccccccc` | - | 2026-01-01 "
+            "| full | current | [result/cpu/kernels/a-c-mkl.md](cpu/kernels/a-c-mkl.md) |\n")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            rc = union_index.main([str(index)])
+        self.assertEqual(rc, 0)
+        text = buffer.getvalue()
+        self.assertIn("reference `aaaaaaaaaaaa`, upstream `v1`", text)
+        self.assertIn("aaaaaaaaaaaa/bbbbbbbbbbbb", text)
+        self.assertIn("aaaaaaaaaaaa/cccccccccccc", text)
+
     def test_package_holds_no_campaign_names(self):
         for path in sorted((TOOLKIT / "campaign_toolkit").rglob("*")):
             if path.suffix not in (".py", ".json"):

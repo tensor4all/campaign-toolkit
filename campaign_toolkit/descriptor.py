@@ -46,16 +46,9 @@ def profiles_dir() -> pathlib.Path:
 
     A profile is a fact about a machine, not about a campaign, so the library is
     shared here and a campaign's `benchmarks/profiles.yaml` *names* the profiles
-    it measures. `CAMPAIGN_TOOLKIT_PROFILES` overrides the location.
+    it measures.
     """
-    env = os.environ.get("CAMPAIGN_TOOLKIT_PROFILES")
-    if env:
-        return pathlib.Path(env).resolve()
-    package = pathlib.Path(__file__).resolve().parent
-    for candidate in (package / "profiles", package.parent / "profiles"):
-        if candidate.is_dir():
-            return candidate
-    return package / "profiles"
+    return pathlib.Path(__file__).resolve().parent / "profiles"
 
 
 def shared_profile(name: str) -> dict:
@@ -140,10 +133,8 @@ class Descriptor:
         campaign uses -- or a name, resolved against the toolkit's shared library.
         """
         declared = yaml.safe_load(self.profiles_file.read_text())
-        out = []
-        for entry in declared["profiles"]:
-            out.append(shared_profile(entry) if isinstance(entry, str) else entry)
-        return out
+        return [shared_profile(entry) if isinstance(entry, str) else entry
+                for entry in declared["profiles"]]
 
     def profile_names(self) -> list:
         return [p["name"] for p in self.profiles()]
