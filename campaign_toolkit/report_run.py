@@ -185,6 +185,51 @@ def provider_text(prov):
     return text
 
 
+VERDICT_FLOOR = 0.05        # a difference below this is not reported even when the starts agreed
+DISPATCH_US = 0.02          # below ~20 us/call the multi-thread rows pay thread-region start-up
+
+
+def comparison_verdict(best, within, key, row_names):
+    """One verdict per other engine: `(direction, ratio)` when the difference beats the band.
+
+    The band is the combined between-start spread of the two rows (sqrt of the two relative
+    sample SDs) floored at 5%, so a cell is only annotated when the difference is larger than
+    the spread the run itself recorded. `within` holds each row's per-process relative SDs.
+    """
+    fork = best.get(key, {}).get(row_names[0])
+    if not fork or len(fork) < 2:
+        return {}
+    out = {}
+    for engine in row_names[1:]:
+        other = best.get(key, {}).get(engine)
+        if not other or len(other) < 2:
+            out[engine] = None
+            continue
+        fork_median, other_median = statistics.median(fork), statistics.median(other)
+        if fork_median <= 0 or other_median <= 0:
+            out[engine] = None
+            continue
+        band = max(math.hypot(statistics.stdev(fork) / fork_median,
+                              statistics.stdev(other) / other_median), VERDICT_FLOOR)
+        ratio = fork_median / other_median
+        out[engine] = (ratio, band) if abs(math.log(ratio)) > band else False
+    return out
+
+
+def verdict_text(verdict, fork_us):
+    """`🔴 2.5x slower` / `🔵 2.5x faster` / `·` inside the band / `-` when not measurable."""
+    if verdict is None:
+        return '-'
+    if verdict is False:
+        return '·'
+    ratio, _ = verdict
+    mark = '🔴' if ratio > 1 else '🔵'
+    text = f'{mark} {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
+    if fork_us is not None and fork_us < DISPATCH_US:
+        text += ' (dispatch-dominated)'
+    return text
+
+
 def spread_guide_text(best, within):
     """One line telling a reader what spread looks like in this run, plus how to read it."""
     guide = spread_guide(best, within)
@@ -318,6 +363,11 @@ def render(manifest, suite, rows, run_dir):
             'per-start median range exceeds 5% of its median, and `p` a balanced cell whose estimated',
             'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
             'between-start variation can exceed the difference being compared.',
+            'The per-engine columns at the right mark only differences larger than the spread this run',
+            'recorded for those two rows (combined between-start SD, floored at 5%): `🔴` the fork is',
+            'slower, `🔵` faster, `·` inside the band, `-` that row is not measured in this arm,',
+            'parentheses around a verdict when the cell itself carries a between-start warning. They',
+            'describe the recorded revisions; they are not a regression claim.',
         ]),
         "",
     ]
@@ -349,8 +399,10 @@ def render(manifest, suite, rows, run_dir):
                                f"(CPU {manifest['threads']['cpu_sets'].get(str(threads), '?')})")
                     out.append("")
                     out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names)
-                               + (f" | vs {row_names[0]} |" if v2 else " |"))
-                    out.append("|" + "---|" * (len(row_names) + 1 + (1 if v2 else 0)))
+                               + (f" | vs {row_names[0]} |" if v2 else " |")
+                               + ("" if not v2 else "".join(f" vs `{e}` |" for e in row_names[1:])))
+                    out.append("|" + "---|" * (len(row_names) + 1 + (1 if v2 else 0)
+                                               + (0 if not v2 else len(row_names) - 1)))
                     for case in cases:
                         cells = []
                         key = (regime, case, dtype, *axis_values, threads)
@@ -371,6 +423,13 @@ def render(manifest, suite, rows, run_dir):
                                      if ratios.get(engine) is not None else f"`{engine}` -"
                                      for engine in row_names[1:]]
                             cells.append(marks + "; ".join(parts))
+                            forks = best.get(key, {}).get(row_names[0]) or []
+                            fork_us = statistics.median(forks) if forks else None
+                            verdicts = comparison_verdict(best, within, key, row_names)
+                            for engine in row_names[1:]:
+                                text = verdict_text(verdicts.get(engine), fork_us)
+                                flagged = between > 0.05 or bool(position and position > 1.05)
+                                cells.append(f"({text})" if flagged and text not in ('-', '·') else text)
                         out.append(f"| `{case}` | " + " | ".join(cells) + " |")
                     out.append("")
                     if not population.get("skipped") and threads in [t for (r, t) in skipped
