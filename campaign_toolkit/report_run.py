@@ -216,12 +216,12 @@ def comparison_verdict(best, within, key, row_names):
     return out
 
 
-def verdict_text(verdict, fork_us):
-    """`🔵 fork 2.5x faster` / `🔴 fork 2.5x slower` / `·` inside the band / `-` not measurable.
+def verdict_text(verdict, fork_us, other):
+    """`🔵 fork 2.5x faster than <row>` / `🔴 fork 2.5x slower than <row>` / `·` / `-`.
 
-    The subject is always the fork: blue means the fork is faster than that row, red means it is
-    slower, so a reader comparing the columns does not have to remember which row the cell belongs
-    to.
+    The subject is the fork and the object is named in the cell, so a BLAS row and an upstream row
+    can never be confused when the columns are read apart: blue means the fork is faster than that
+    named row, red means it is slower.
     """
     if verdict is None:
         return '-'
@@ -229,8 +229,8 @@ def verdict_text(verdict, fork_us):
         return '·'
     ratio, _ = verdict
     mark = '🔴' if ratio > 1 else '🔵'
-    text = f'{mark} fork {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
-    return text
+    return (f'{mark} fork {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
+            + f' than `{other}`')
 
 
 def spread_guide_text(best, within):
@@ -368,8 +368,9 @@ def render(manifest, suite, rows, run_dir):
             'between-start variation can exceed the difference being compared.',
             'The `vs` columns mark only differences larger than the spread this run recorded for those',
             'two rows (combined between-start SD, floored at 5%), always with the fork as the subject:',
-            '`🔵 fork X faster` / `🔴 fork X slower`, `·` inside the band, `-` that row is not measured in',
-            'this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
+            '`🔵 fork X faster than <row>` / `🔴 fork X slower than <row>` (the compared row is named in',
+            'the cell, not only in the column header), `·` inside the band, `-` that row is not',
+            'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
             '`!` between-start range over 5%, `p` position effect over 5%, dispatch-dominated means the',
             'row is under 20 us so 4T/8T pay thread-region start-up). Per-start ratios and every',
             'chronological sample are in the run directory named at the top of this page (`run*.csv`).',
@@ -427,7 +428,7 @@ def render(manifest, suite, rows, run_dir):
                             fork_us = statistics.median(forks) if forks else None
                             verdicts = comparison_verdict(best, within, key, row_names)
                             for engine in row_names[1:]:
-                                cells.append(verdict_text(verdicts.get(engine), fork_us))
+                                cells.append(verdict_text(verdicts.get(engine), fork_us, engine))
                             notes = []
                             if not balanced:
                                 notes.append('`*` one row has no measurement here')
