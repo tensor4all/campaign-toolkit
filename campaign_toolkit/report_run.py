@@ -9,6 +9,7 @@ into a discussion without its commit is the thing this repository exists to stop
 import argparse
 import csv
 import itertools
+import math
 import pathlib
 import statistics
 import sys
@@ -64,7 +65,7 @@ def best_per_case(rows, policy=None):
     the same shape of another.
     """
     axes = report_axes(rows, policy)
-    best, skipped, within = {}, {}, {}
+    best, skipped, within, series = {}, {}, {}, {}
     v2 = policy is not None and policy['version'] == 2
     for row in rows:
         key = (row["regime"], case_name(row, variants=v2), row["dtype"],
@@ -81,9 +82,38 @@ def best_per_case(rows, policy=None):
             values = samples(row, policy['repetitions'])
             times.append(statistics.median(values))
             within.setdefault(key, {}).setdefault(row['row'], []).append(statistics.stdev(values))
+            # Kept by explicit repeat identity: a ratio joins two engines of one start, never two
+            # rows that merely happen to sit next to each other in a list.
+            series.setdefault((key, row['row']), {})[row['repeat']] = statistics.median(values)
         else:
             times.append(float(row["total_ms"]))
-    return best, skipped, within
+    return best, skipped, within, series
+
+
+def rotation_ratios(series, key, engines, fork):
+    """Rotation-averaged engine/fork ratio for one cell, and whether it is position-balanced.
+
+    The per-start ratios are averaged in log space, so the result is the geometric mean of the
+    ratios measured inside each process start. It removes a position effect only when every
+    declared engine has a measured row (each engine then visits every row position once) and only
+    under a position effect shared by the engines and stable across starts; the caller must keep
+    that qualifier and the per-start ratios visible.
+    """
+    balanced = all(series.get((key, engine)) for engine in engines)
+    ratios, detail = {}, {}
+    for engine in engines:
+        if engine == fork:
+            continue
+        first, second = series.get((key, fork)) or {}, series.get((key, engine)) or {}
+        shared = sorted(set(first) & set(second))
+        if len(shared) < 2:
+            ratios[engine] = None
+            detail[engine] = '-'
+            continue
+        logs = [math.log(second[r]) - math.log(first[r]) for r in shared]
+        ratios[engine] = math.exp(statistics.fmean(logs))
+        detail[engine] = ' '.join(f'{math.exp(value):.3f}' for value in logs)
+    return ratios, detail, balanced
 
 
 def provider_text(prov):
@@ -116,7 +146,7 @@ def render(manifest, suite, rows, run_dir):
     if v2:
         from .timing_evidence import validate
         validate(manifest, run_dir)
-    best, skipped, within = best_per_case(rows, manifest['timing_policy'])
+    best, skipped, within, series = best_per_case(rows, manifest['timing_policy'])
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
@@ -202,6 +232,15 @@ def render(manifest, suite, rows, run_dir):
             'not confidence intervals. The between-process spread includes the rotating-order schedule.',
             f"Each process retains {manifest['timing_policy']['repetitions']} chronological calls; "
             f"{manifest['run_spec']['aa']} complete process sets are recorded.",
+            f"The `vs {row_names[0]}` column is the rotation-averaged ratio exp(mean over starts of",
+            f"log(engine median / {row_names[0]} median)), with the per-start ratios beside it: `R > 1`",
+            'means the engine was slower than that first-declared row in that start. It removes a',
+            'row-position',
+            'effect only under one position effect shared by the engines and stable across starts,',
+            'and only where every declared engine has a measured row (`*` marks a cell where one has',
+            'no row, so the average is not position-balanced). `!` marks a cell whose per-start',
+            'median range exceeds 5% of its median: such a cell is retained, not discarded, and the',
+            'between-start variation may exceed the difference being compared.',
         ]),
         "",
     ]
@@ -232,18 +271,33 @@ def render(manifest, suite, rows, run_dir):
                     out.append(f"## {section} "
                                f"(CPU {manifest['threads']['cpu_sets'].get(str(threads), '?')})")
                     out.append("")
-                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names) + " |")
-                    out.append("|" + "---|" * (len(row_names) + 1))
+                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names)
+                               + (f" | vs {row_names[0]} |" if v2 else " |"))
+                    out.append("|" + "---|" * (len(row_names) + 1 + (1 if v2 else 0)))
                     for case in cases:
                         cells = []
+                        key = (regime, case, dtype, *axis_values, threads)
                         for engine in row_names:
-                            key = (regime, case, dtype, *axis_values, threads)
                             times = best.get(key, {}).get(engine, [])
                             if times and v2:
                                 cells.append(f"{statistics.median(times):.6g} ± {statistics.stdev(times):.6g} "
                                              f"(W {statistics.median(within[key][engine]):.6g})")
                             else:
                                 cells.append(f"{min(times):.4f}" if times else "-")
+                        if v2:
+                            ratios, detail, balanced = rotation_ratios(series, key, row_names, row_names[0])
+                            medians = [statistics.median(times) for engine in row_names
+                                       for times in [best.get(key, {}).get(engine, [])] if times]
+                            warn = (max(medians) - min(medians)) / statistics.median(medians) > 0.05
+                            parts = []
+                            for engine in row_names[1:]:
+                                if ratios.get(engine) is None:
+                                    parts.append(f"`{engine}` -")
+                                    continue
+                                mark = "" if balanced else "*"
+                                parts.append(f"`{engine}` {ratios[engine]:.4g}{mark} "
+                                             f"({detail[engine]})")
+                            cells.append(("! " if warn else "") + "; ".join(parts))
                         out.append(f"| `{case}` | " + " | ".join(cells) + " |")
                     out.append("")
                     if not population.get("skipped") and threads in [t for (r, t) in skipped

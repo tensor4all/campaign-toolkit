@@ -94,14 +94,20 @@ class TimingEvidenceTest(unittest.TestCase):
         manifest['timing_policy']['minimum_untimed_priming_ms'] = 3000
         suite = yaml.safe_load((fixture / 'benchmarks/suites/fixture-kernels.yaml').read_text())
         rows = report_run.read_rows([self.root / name for name in self.manifest['result_files']])
-        best, _, within = report_run.best_per_case(rows, manifest['timing_policy'])
+        best, _, within, series = report_run.best_per_case(rows, manifest['timing_policy'])
         self.assertEqual(len(best), 4)  # Two variants, two orders.
         self.assertEqual(best[('small', 'mul/n2/b1 [block]', 'f64', 'c', 1)]['candidate'], [2, 3, 4])
         self.assertEqual(best[('small', 'mul/n2/b1 [block]', 'f64', 'f', 1)]['candidate'], [12, 13, 14])
         self.assertEqual(len(within[('small', 'mul/n2/b1 [block]', 'f64', 'c', 1)]['candidate']), 3)
+        ratios, detail, balanced = report_run.rotation_ratios(
+            series, ('small', 'mul/n2/b1 [block]', 'f64', 'c', 1), self.engines, 'candidate')
+        self.assertEqual(ratios['baseline'], 1.0)      # Synthetic rows differ only by rotation.
+        self.assertEqual(detail['baseline'], '1.000 1.000 1.000')
+        self.assertTrue(balanced)                       # All three declared engines have rows.
         text = report_run.render(manifest, suite, rows, self.root)
         self.assertIn('3 ± 1', text)
         self.assertIn('13 ± 1', text)
+        self.assertIn('vs candidate', text)
         self.assertIn('c order', text)
         self.assertIn('f order', text)
         self.assertIn('[block]', text)
