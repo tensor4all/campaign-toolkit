@@ -584,6 +584,7 @@ def main(argv=None, root=None):
                                 "--batch", ",".join(str(b) for b in population["batch"]),
                                 "--dtype", ",".join(dtypes),
                                 "--family", ",".join(population["families"]),
+                                "--rows", ",".join(engines),
                                 *(['--regime', population['regime'], '--csv', str(run_dir / f'{stem}.csv')]
                                   if v2 else [])],
                                env=env, capture_output=True, text=True)
@@ -609,6 +610,7 @@ def main(argv=None, root=None):
                                     "--dtype", ",".join(dtypes),
                                     "--family", ",".join(population["families"]),
                                     "--regime", population["regime"],
+                                    "--rows", ",".join(engines),
                                     "--reps", str(args.reps), "--prime-ms", str(args.prime_ms),
                                     *(['--statistic', 'median', '--rotate-rows', str(rep % len(engines))]
                                       if v2 else []),
