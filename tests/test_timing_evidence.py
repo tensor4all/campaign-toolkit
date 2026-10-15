@@ -99,11 +99,14 @@ class TimingEvidenceTest(unittest.TestCase):
         self.assertEqual(best[('small', 'mul/n2/b1 [block]', 'f64', 'c', 1)]['candidate'], [2, 3, 4])
         self.assertEqual(best[('small', 'mul/n2/b1 [block]', 'f64', 'f', 1)]['candidate'], [12, 13, 14])
         self.assertEqual(len(within[('small', 'mul/n2/b1 [block]', 'f64', 'c', 1)]['candidate']), 3)
-        ratios, detail, balanced = report_run.rotation_ratios(
-            series, ('small', 'mul/n2/b1 [block]', 'f64', 'c', 1), self.engines, 'candidate')
+        key = ('small', 'mul/n2/b1 [block]', 'f64', 'c', 1)
+        ratios, detail = report_run.rotation_ratios(series, key, self.engines, 'candidate')
         self.assertEqual(ratios['baseline'], 1.0)      # Synthetic rows differ only by rotation.
         self.assertEqual(detail['baseline'], '1.000 1.000 1.000')
+        balanced, between, position = report_run.cell_statistics(series, key, self.engines)
         self.assertTrue(balanced)                       # All three declared engines have rows.
+        self.assertGreater(between, 0.05)               # Each engine moves 2/3/4 ms across starts.
+        self.assertEqual(position, 1.0)                 # Identical engines carry no position signal.
         text = report_run.render(manifest, suite, rows, self.root)
         self.assertIn('3 ± 1', text)
         self.assertIn('13 ± 1', text)

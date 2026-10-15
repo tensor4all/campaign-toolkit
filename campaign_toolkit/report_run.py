@@ -84,7 +84,7 @@ def best_per_case(rows, policy=None):
             within.setdefault(key, {}).setdefault(row['row'], []).append(statistics.stdev(values))
             # Kept by explicit repeat identity: a ratio joins two engines of one start, never two
             # rows that merely happen to sit next to each other in a list.
-            series.setdefault((key, row['row']), {})[row['repeat']] = statistics.median(values)
+            series.setdefault((key, row['row']), {})[row['repeat']] = times[-1]
         else:
             times.append(float(row["total_ms"]))
     return best, skipped, within, series
@@ -99,7 +99,6 @@ def rotation_ratios(series, key, engines, fork):
     under a position effect shared by the engines and stable across starts; the caller must keep
     that qualifier and the per-start ratios visible.
     """
-    balanced = all(series.get((key, engine)) for engine in engines)
     ratios, detail = {}, {}
     for engine in engines:
         if engine == fork:
@@ -108,12 +107,42 @@ def rotation_ratios(series, key, engines, fork):
         shared = sorted(set(first) & set(second))
         if len(shared) < 2:
             ratios[engine] = None
-            detail[engine] = '-'
             continue
         logs = [math.log(second[r]) - math.log(first[r]) for r in shared]
         ratios[engine] = math.exp(statistics.fmean(logs))
         detail[engine] = ' '.join(f'{math.exp(value):.3f}' for value in logs)
-    return ratios, detail, balanced
+    return ratios, detail
+
+
+def cell_statistics(series, key, engines):
+    """(position-balanced?, worst between-start relative range, position-effect ratio or None).
+
+    `between` is the largest relative range of a *single* engine's own per-start medians, so it
+    measures variation between process starts rather than the difference between engines.
+    `position` is exp(max - min) of the per-position mean log medians, and is defined only where
+    every declared engine has a measured row in every start (a real Latin square) and only for the
+    shared, start-invariant position model; it is None otherwise.
+    """
+    per_start = {engine: series.get((key, engine)) or {} for engine in engines}
+    balanced = all(per_start.values())
+    between = max(((max(values.values()) - min(values.values())) / statistics.median(values.values())
+                   for values in per_start.values()
+                   if len(values) > 1 and statistics.median(values.values()) > 0), default=0.0)
+    position = None
+    if balanced and len(engines) > 1 and len(per_start[engines[0]]) > 1:
+        means = {}
+        for repeat in per_start[engines[0]]:
+            try:
+                rotation = int(repeat[3:]) % len(engines)
+            except ValueError:
+                return balanced, between, None
+            order = engines[rotation:] + engines[:rotation]
+            for spot, engine in enumerate(order):
+                means.setdefault(spot, []).append(math.log(per_start[engine][repeat]))
+        if len(means) == len(engines):
+            values = [statistics.fmean(positions) for positions in means.values()]
+            position = math.exp(max(values) - min(values))
+    return balanced, between, position
 
 
 def provider_text(prov):
@@ -238,9 +267,10 @@ def render(manifest, suite, rows, run_dir):
             'row-position',
             'effect only under one position effect shared by the engines and stable across starts,',
             'and only where every declared engine has a measured row (`*` marks a cell where one has',
-            'no row, so the average is not position-balanced). `!` marks a cell whose per-start',
-            'median range exceeds 5% of its median: such a cell is retained, not discarded, and the',
-            'between-start variation may exceed the difference being compared.',
+            'no row, so no ratio there is position-balanced). `!` marks a cell where some engine\'s own',
+            'per-start median range exceeds 5% of its median, and `p` a balanced cell whose estimated',
+            'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
+            'between-start variation can exceed the difference being compared.',
         ]),
         "",
     ]
@@ -285,19 +315,15 @@ def render(manifest, suite, rows, run_dir):
                             else:
                                 cells.append(f"{min(times):.4f}" if times else "-")
                         if v2:
-                            ratios, detail, balanced = rotation_ratios(series, key, row_names, row_names[0])
-                            medians = [statistics.median(times) for engine in row_names
-                                       for times in [best.get(key, {}).get(engine, [])] if times]
-                            warn = (max(medians) - min(medians)) / statistics.median(medians) > 0.05
-                            parts = []
-                            for engine in row_names[1:]:
-                                if ratios.get(engine) is None:
-                                    parts.append(f"`{engine}` -")
-                                    continue
-                                mark = "" if balanced else "*"
-                                parts.append(f"`{engine}` {ratios[engine]:.4g}{mark} "
-                                             f"({detail[engine]})")
-                            cells.append(("! " if warn else "") + "; ".join(parts))
+                            ratios, detail = rotation_ratios(series, key, row_names, row_names[0])
+                            balanced, between, position = cell_statistics(series, key, row_names)
+                            marks = ("* " if not balanced else "") \
+                                + ("! " if between > 0.05 else "") \
+                                + ("p " if position and position > 1.05 else "")
+                            parts = [f"`{engine}` {ratios[engine]:.4g} ({detail[engine]})"
+                                     if ratios.get(engine) is not None else f"`{engine}` -"
+                                     for engine in row_names[1:]]
+                            cells.append(marks + "; ".join(parts))
                         out.append(f"| `{case}` | " + " | ".join(cells) + " |")
                     out.append("")
                     if not population.get("skipped") and threads in [t for (r, t) in skipped
