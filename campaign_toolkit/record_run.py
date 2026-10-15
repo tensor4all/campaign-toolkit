@@ -53,6 +53,21 @@ def git(dir_, *args):
                           text=True, capture_output=True).stdout.strip()
 
 
+def toolkit_identity(root):
+    """V2 needs this package's own Git checkout, not an enclosing campaign repo."""
+    root = pathlib.Path(root).resolve()
+    try:
+        own_root = pathlib.Path(git(root, 'rev-parse', '--show-toplevel')).resolve()
+    except subprocess.CalledProcessError:
+        own_root = None
+    if own_root != root:
+        sys.exit('ERROR: v2 recording requires an editable toolkit install from its own '
+                 'Git checkout; an installed distribution has no usable source identity')
+    return {'commit': git(root, 'rev-parse', 'HEAD'),
+            'dirty': bool(git(root, 'status', '--porcelain', '--untracked-files=normal')),
+            'measured_path': str(root)}
+
+
 def build(checkout, vendor, upstream=None):
     d = descriptor.current()
     env_file = d.root / "target" / f"pin-{vendor}.env"
@@ -319,9 +334,7 @@ def main(argv=None, root=None):
         if args.reps < 2 or args.aa < len(engines) or args.aa % len(engines):
             sys.exit('ERROR: v2 needs >=2 calls and complete engine-order rotation cycles')
         toolkit_root = pathlib.Path(__file__).resolve().parent.parent
-        toolkit = {'commit': git(toolkit_root, 'rev-parse', 'HEAD'),
-                   'dirty': bool(git(toolkit_root, 'status', '--porcelain', '--untracked-files=normal')),
-                   'measured_path': str(toolkit_root)}
+        toolkit = toolkit_identity(toolkit_root)
         if toolkit['dirty'] or harness['dirty']:
             sys.exit('ERROR: v2 requires clean, committed toolkit and harness source')
 
@@ -546,9 +559,11 @@ def main(argv=None, root=None):
                     "--run-dir", str(run_dir)],
                    env=dict(os.environ, CAMPAIGN_ROOT=str(d.root)),
                    cwd=str(pathlib.Path(__file__).resolve().parent.parent), check=True)
+    code = 0
     if not args.no_publish:
-        descriptor.run_module("publish_report", [str(run_dir)], root=d.root)
-    return 0
+        code = descriptor.run_module("publish_report", [str(run_dir)], root=d.root).returncode
+    lock.close()
+    return code
 
 
 if __name__ == "__main__":

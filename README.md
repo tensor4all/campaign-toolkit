@@ -98,6 +98,13 @@ V2 validation rejects incomplete or duplicate process/cell/variant coverage and
 inconsistent aggregates. Reports show medians with separate within-process and
 scheduled between-process sample SD, not best-of-repeats or confidence intervals.
 `{timing}` in `page_name` keeps revised-contract pages separate from historical v1.
+For v2 recording, install the toolkit **editable from its own Git checkout**
+(e.g. `pip install -e ../campaign-toolkit`). A wheel or ordinary non-editable VCS
+installation does not retain the required source identity; an enclosing campaign
+Git repository is not a substitute. A pinned pip VCS requirement can use
+`-e git+https://github.com/tensor4all/campaign-toolkit@COMMIT#egg=campaign-toolkit`.
+V1 readers/recorders do not acquire this Git-checkout prerequisite.
+
 Existing campaigns/manifests without this opt-in retain v1 rendering. The legacy
 revision-comparison command explicitly refuses v2 rather than pool variants or
 select minima; v2 candidate comparison is deferred until that next phase.

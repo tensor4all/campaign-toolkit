@@ -16,13 +16,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 TOOLKIT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TOOLKIT))
 
 from campaign_toolkit import (  # noqa: E402
     campaign, compare_runs, descriptor, gen_index, jsonschema_lite, publish_report,
-    report_run, union_index, validate_run,
+    record_run, report_run, union_index, validate_run,
 )
 
 FIXTURE = TOOLKIT / "tests/fixture"
@@ -77,6 +78,58 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertEqual(d.vendor_providers, ("openblas",))
         self.assertEqual(d.measured_providers, ("algo",))
         self.assertEqual(len(d.csv_columns), 12)
+
+    def test_v2_toolkit_identity_rejects_distributions_and_enclosing_repos(self):
+        identity = record_run.toolkit_identity(self.checkout)
+        self.assertEqual(identity['commit'], git(self.checkout, 'rev-parse', 'HEAD'))
+        self.assertFalse(identity['dirty'])
+        nested = self.checkout / '.venv/lib/site-packages'
+        nested.mkdir(parents=True)
+        # The old plain rev-parse silently reported the enclosing project's Git.
+        self.assertEqual(git(nested, 'rev-parse', '--show-toplevel'), str(self.checkout))
+        outside = pathlib.Path(self.tmp.name) / 'site-packages'
+        outside.mkdir()
+        for root in (nested, outside):
+            with self.assertRaisesRegex(SystemExit, 'editable.*Git checkout'):
+                record_run.toolkit_identity(root)
+        (self.checkout / 'untracked-source').write_text('dirty\n')
+        self.assertTrue(record_run.toolkit_identity(self.checkout)['dirty'])
+
+    def test_record_propagates_index_failure_and_honors_no_publish(self):
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+        for no_publish in (False, True):
+            modules = []
+
+            def child(module, args, **kwargs):
+                modules.append(module)
+                code = (37 if module == 'gen_index' else
+                        publish_report.main(args, root=self.root) if module == 'publish_report' else 0)
+                return subprocess.CompletedProcess(args, code, stdout='', stderr='')
+
+            def process(args, **kwargs):
+                if '--csv' in args:
+                    shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+                elif 'campaign_toolkit.report_run' in args:
+                    directory = pathlib.Path(args[args.index('--run-dir') + 1])
+                    (directory / 'report.md').write_text('Synthetic failure-propagation test report.\n')
+                return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
+
+            with (mock.patch.object(record_run, 'build', return_value=pin),
+                  mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
+                                    original['library']['commit'] if args[0] == 'rev-parse' else ''),
+                  mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
+                  mock.patch.object(record_run, 'vendor_identity', return_value={'vendor.name': 'openblas'}),
+                  mock.patch.object(record_run, 'host_info', return_value=original['host']),
+                  mock.patch.object(record_run.subprocess, 'run', side_effect=process),
+                  mock.patch.object(descriptor, 'run_module', side_effect=child)):
+                args = ['fixture-cpu', 'fixture-kernels', '--threads', '1', '--label', str(no_publish)]
+                code = record_run.main(args + (['--no-publish'] if no_publish else []), root=self.root)
+            self.assertEqual(code, 0 if no_publish else 37)
+            self.assertEqual('gen_index' in modules, not no_publish)
+            self.assertEqual('publish_report' in modules, not no_publish)
 
     def test_descriptor_path_can_be_named(self):
         alt = self.root / "alt-campaign.yaml"

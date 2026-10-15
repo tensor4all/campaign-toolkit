@@ -71,7 +71,7 @@ def publish(run_dir):
         report.write_text(header + (run_dir / "report.md").read_text())
         print(f"replaced the partial {report.relative_to(d.root)} with this run "
               f"(coverage=partial): the page it held did not cover the whole declaration")
-    descriptor.run_module("gen_index", ["--write"], root=d.root)
+    return descriptor.run_module("gen_index", ["--write"], root=d.root).returncode
 
 
 def main(argv=None, root=None):
@@ -80,8 +80,7 @@ def main(argv=None, root=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
     args = ap.parse_args(argv)
-    publish(pathlib.Path(args.run_dir).resolve())
-    return 0
+    return publish(pathlib.Path(args.run_dir).resolve())
 
 
 if __name__ == "__main__":
