@@ -98,14 +98,22 @@ def observer_cpus(cpu_sets):
     return online_cpus() - domains
 
 
-def require_measured_cpus_share_one_l3(cpu_sets):
-    """A cell's threads must sit in one L3 domain, so the same cache serves every measured core."""
+def warn_if_measured_cpus_span_l3_domains(cpu_sets):
+    """A measured set may span L3 domains; say so, because every touched domain must stay quiet.
+
+    Legitimate measurements can need more cores than one last-level cache serves, so spanning is
+    not refused. What must not happen silently is a set that fills only part of several domains:
+    the idle guard watches every domain the measurement touches (cache peers as well as SMT
+    siblings), and unrelated work on the free cores of a touched domain would contend for the same
+    cache. This is a warning to the operator, not a validity rule.
+    """
     for threads, spec in cpu_sets.items():
         domains = {frozenset(l3_domain(cpu)) for cpu in parse_cpu_list(spec)}
         if len(domains) > 1:
-            sys.exit(f"ERROR: the {threads}T CPU set {spec!r} spans the L3 domains "
-                     f"{sorted(sorted(d) for d in domains)}; a measured thread set must share one L3, "
-                     f"otherwise its cores do not see the same cache")
+            print(f"warning: the {threads}T CPU set {spec!r} spans the L3 domains "
+                  f"{sorted(sorted(d) for d in domains)}; every CPU in those domains is watched by "
+                  f"the idle guard, so the whole domains - not only the measured cores - must stay "
+                  f"idle for the run to be admitted", file=sys.stderr)
 
 
 def require_observer_off_measured_cpus(cpu_sets):
@@ -118,14 +126,23 @@ def require_observer_off_measured_cpus(cpu_sets):
     machine's topology, not from a hardcoded CPU list.
     """
     measured = measured_cpus(cpu_sets)
+    free_cpus = observer_cpus(cpu_sets)
     mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
     shared = sorted(mine & measured)
     if shared:
         free = ", ".join(f"{low}" if high == low else f"{low}-{high}"
-                         for low, high in ranges(sorted(observer_cpus(cpu_sets))))
+                         for low, high in ranges(sorted(free_cpus)))
         sys.exit(f"ERROR: this recording process may run on measured CPUs {shared} "
                  f"(measured set with siblings: {sorted(measured)}); pin the observing side off the "
                  f"measured L3 domain, for example `taskset -c {free or '?'} python3 <recorder> ...`")
+    if not free_cpus and os.environ.get("FBENCH_OBSERVER_SHARES_L3") != "1":
+        sys.exit("ERROR: the measured CPUs cover every L3 domain on this host, so the observing side "
+                 "cannot be placed off the measured cache. Park the observing side for the "
+                 "measurement, or set FBENCH_OBSERVER_SHARES_L3=1 to record the residual sharing "
+                 "explicitly instead of leaving it implicit")
+    if not free_cpus:
+        print("warning: FBENCH_OBSERVER_SHARES_L3=1 - the observing side shares an L3 domain with the "
+              "measurement; the residual contention is recorded, not removed", file=sys.stderr)
 
 
 def ranges(cpus):
@@ -188,7 +205,23 @@ def host_info(profile_name, profiles):
                     if line.startswith("CPU(s):")), 0)
     l3 = next((line.split(":", 1)[1].strip() for line in lscpu.splitlines()
                if line.startswith("L3 cache:")), None)
+    power = {}
+    for name, path in (("cpufreq_boost", "/sys/devices/system/cpu/cpufreq/boost"),
+                       ("intel_no_turbo", "/sys/devices/system/cpu/intel_pstate/no_turbo"),
+                       ("amd_pstate_status", "/sys/devices/system/cpu/amd_pstate/status"),
+                       ("platform_profile", "/sys/firmware/acpi/platform_profile"),
+                       ("governor", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+                       ("energy_performance_preference",
+                        "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference"),
+                       ("scaling_max_freq_khz", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")):
+        node = pathlib.Path(path)
+        try:
+            if node.exists():
+                power[name] = node.read_text().strip()
+        except OSError:
+            pass
     return {
+        "power": power or None,
         "hostname": platform.node(),
         "cpu": profile["cpu"],
         "os": f"{platform.system()} {platform.release()}",
@@ -410,7 +443,7 @@ def main(argv=None, root=None):
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
-    require_measured_cpus_share_one_l3(cpu_sets)
+    warn_if_measured_cpus_span_l3_domains(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')

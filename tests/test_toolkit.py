@@ -139,13 +139,27 @@ class FixtureCampaignTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'may run on measured CPUs'):
                 record_run.require_observer_off_measured_cpus({'1': '4-11'})
 
-    def test_measured_threads_must_share_one_l3_domain(self):
+    def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
-            record_run.require_measured_cpus_share_one_l3({'4': '4-7'})   # one domain: no exit
+            with mock.patch('sys.stderr', new_callable=io.StringIO) as quiet:
+                record_run.warn_if_measured_cpus_span_l3_domains({'4': '4-7'})   # one domain
+                self.assertEqual(quiet.getvalue(), '')
         with mock.patch.object(record_run, 'l3_domain',
                                side_effect=lambda cpu: {0, 1} if cpu < 4 else {4, 5}):
-            with self.assertRaisesRegex(SystemExit, 'must share one L3'):
-                record_run.require_measured_cpus_share_one_l3({'8': '0-7'})
+            with mock.patch('sys.stderr', new_callable=io.StringIO) as loud:
+                record_run.warn_if_measured_cpus_span_l3_domains({'8': '0-7'})
+                self.assertIn('spans the L3 domains', loud.getvalue())           # warned, not refused
+
+    def test_observer_sharing_every_domain_must_be_acknowledged(self):
+        with (mock.patch.object(record_run, 'l3_domain', return_value={4, 5}),
+              mock.patch.object(record_run, 'online_cpus', return_value={4, 5}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={99})):
+            with self.assertRaisesRegex(SystemExit, 'cover every L3 domain'):
+                record_run.require_observer_off_measured_cpus({'1': '4'})
+            with mock.patch.dict(os.environ, {'FBENCH_OBSERVER_SHARES_L3': '1'}), \
+                 mock.patch('sys.stderr', new_callable=io.StringIO) as loud:
+                record_run.require_observer_off_measured_cpus({'1': '4'})
+                self.assertIn('residual contention is recorded', loud.getvalue())
 
     def test_descriptor_path_can_be_named(self):
         alt = self.root / "alt-campaign.yaml"
