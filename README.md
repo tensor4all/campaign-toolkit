@@ -88,6 +88,22 @@ currency each campaign already computed against *its own* pins and
 `invalidated_by` paths — this command re-derives no number. Each row links back
 to the campaign's page and to the campaign's own index.
 
+## Version-2 timing evidence
+
+A campaign can opt into `timing: {version: 2}` and optionally declare validated
+`aa`, `reps`, and `prime_ms` defaults. Its harness must implement median/raw-sample
+output, explicit row rotation, observed thread-budget columns, and a verification
+CSV census. The recorder requires clean committed library/harness/toolkit source.
+V2 validation rejects incomplete or duplicate process/cell/variant coverage and
+inconsistent aggregates. Reports show medians with separate within-process and
+scheduled between-process sample SD, not best-of-repeats or confidence intervals.
+`{timing}` in `page_name` keeps revised-contract pages separate from historical v1.
+Existing campaigns/manifests without this opt-in retain v1 rendering. The legacy
+revision-comparison command explicitly refuses v2 rather than pool variants or
+select minima; v2 candidate comparison is deferred until that next phase.
+Use `record_run --no-publish` for validated smoke/control artifacts without
+publishing a numerical page.
+
 ## Layout
 
 | path | what |

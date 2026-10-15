@@ -43,21 +43,23 @@ def read_rows(csv_paths):
     return rows
 
 
-def case_name(row):
+def case_name(row, variants=False):
     shape = case_dims(int(row["m"]), int(row["n"]), row.get("k", ""))
-    return f"{row['family']}/{shape}/b{row['batch']}"
+    name = f"{row['family']}/{shape}/b{row['batch']}"
+    return name + (f" [{row['note']}]" if variants and row.get('note') else '')
 
 
-def best_per_case(rows):
+def best_per_case(rows, policy=None):
     """(regime, case, dtype, *axes, threads) -> engine row -> times, and skipped cases.
 
     A declared case axis is part of the key, so a cell of one order is never pooled with
     the same shape of another.
     """
     axes = descriptor.current().case_axes
-    best, skipped = {}, {}
+    best, skipped, within = {}, {}, {}
+    v2 = policy is not None and policy['version'] == 2
     for row in rows:
-        key = (row["regime"], case_name(row), row["dtype"],
+        key = (row["regime"], case_name(row, variants=v2), row["dtype"],
                *(row[a] for a in axes), int(row["threads"]))
         if row["status"] == "skipped":
             skipped.setdefault((row["regime"], int(row["threads"])), set()).add(
@@ -66,8 +68,14 @@ def best_per_case(rows):
         if row["status"] != "ok":
             continue
         times = best.setdefault(key, {}).setdefault(row["row"], [])
-        times.append(float(row["total_ms"]))
-    return best, skipped
+        if v2:
+            from .timing_evidence import samples
+            values = samples(row, policy['repetitions'])
+            times.append(statistics.median(values))
+            within.setdefault(key, {}).setdefault(row['row'], []).append(statistics.stdev(values))
+        else:
+            times.append(float(row["total_ms"]))
+    return best, skipped, within
 
 
 def provider_text(prov):
@@ -95,7 +103,11 @@ def render(manifest, suite, rows, run_dir):
     # prints the arms it has, and a vendor arm has one LAPACK row because one binary links one
     # vendor library.
     row_names = list(engines)
-    best, skipped = best_per_case(rows)
+    v2 = manifest['timing_policy']['version'] == 2
+    if v2:
+        from .timing_evidence import validate
+        validate(manifest, run_dir)
+    best, skipped, within = best_per_case(rows, manifest['timing_policy'])
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
@@ -113,6 +125,8 @@ def render(manifest, suite, rows, run_dir):
         f"- features: `{', '.join(library['features']) or 'default'}`",
         *([f"- {report['provider_label']}: " + "; ".join(provider_text(p) for p in deps)] if deps else []),
         f"- {report['harness_label']}: `{manifest['harness']['commit']}`",
+        *([f"- toolkit commit: `{manifest['toolkit']['commit']}`",
+           f"- measured binary SHA-256: `{manifest['binary']['sha256']}`"] if v2 else []),
         f"- hardware profile: `{manifest['target_profile']}`",
         f"- timestamp: `{manifest['timestamp']}`",
         f"- timing policy: v{manifest['timing_policy']['version']}, "
@@ -172,7 +186,14 @@ def render(manifest, suite, rows, run_dir):
                                    for t, c in sorted(manifest["threads"]["cpu_sets"].items(),
                                                       key=lambda kv: int(kv[0]))),
         "",
-        *d.verify_note().replace("{binary}", d.measured["binary"]).splitlines(),
+        *(d.verify_note().replace("{binary}", d.measured["binary"]).splitlines() if not v2 else [
+            'Every timed cell matches a successful verification census, including operation variants.',
+            'Each cell is median of process medians ± sample SD of those medians; W is the median',
+            'within-process sample SD. All values are milliseconds. These are descriptive spreads,',
+            'not confidence intervals. The between-process spread includes the rotating-order schedule.',
+            f"Each process retains {manifest['timing_policy']['repetitions']} chronological calls; "
+            f"{manifest['run_spec']['aa']} complete process sets are recorded.",
+        ]),
         "",
     ]
     for population in manifest["run_spec"]["populations"]:
@@ -209,7 +230,11 @@ def render(manifest, suite, rows, run_dir):
                         for engine in row_names:
                             key = (regime, case, dtype, *axis_values, threads)
                             times = best.get(key, {}).get(engine, [])
-                            cells.append(f"{min(times):.4f}" if times else "-")
+                            if times and v2:
+                                cells.append(f"{statistics.median(times):.6g} ± {statistics.stdev(times):.6g} "
+                                             f"(W {statistics.median(within[key][engine]):.6g})")
+                            else:
+                                cells.append(f"{min(times):.4f}" if times else "-")
                         out.append(f"| `{case}` | " + " | ".join(cells) + " |")
                     out.append("")
                     if not population.get("skipped") and threads in [t for (r, t) in skipped
@@ -224,7 +249,12 @@ def render(manifest, suite, rows, run_dir):
             out.append(f"Not applicable to this population's shapes and reported as skipped: "
                        f"{', '.join('`' + c + '`' for c in population['skipped'])}.")
             out.append("")
-    if manifest["run_spec"]["aa"] > 1:
+    if v2:
+        out.append('Repeated process sets describe observed repeatability under the recorded order '
+                   'schedule; they are not a paired baseline/candidate experiment and do not '
+                   'establish equal performance between engines.')
+        out.append('')
+    elif manifest["run_spec"]["aa"] > 1:
         spreads = []
         for key, per_row in best.items():
             for engine, times in per_row.items():

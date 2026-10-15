@@ -262,6 +262,17 @@
         "minLength": 1
       }
     },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": {"enum": [2]},
+        "aa": {"type": "integer", "minimum": 3},
+        "reps": {"type": "integer", "minimum": 2},
+        "prime_ms": {"type": "integer", "minimum": 1}
+      }
+    },
     "csv_columns": {
       "description": "The columns the harness's CSV must carry, as the report and the comparison read them.",
       "type": "array",
@@ -285,7 +296,7 @@
       "minLength": 1
     },
     "page_name": {
-      "description": "Template naming a published page. Tokens: {library12} {upstream12} {version} {vendor} {dirty}. For example `{library12}{version}{vendor}{dirty}` for one measured revision, or `{library12}-{upstream12}{vendor}{dirty}` when a baseline is recorded too.",
+      "description": "Template naming a published page. Tokens: {library12} {upstream12} {version} {vendor} {dirty} {timing}. The timing token is empty for v1 and -timing-vN for later policies. For example `{library12}{version}{vendor}{dirty}` for one measured revision, or `{library12}-{upstream12}{vendor}{dirty}` when a baseline is recorded too.",
       "type": "string",
       "minLength": 1
     },

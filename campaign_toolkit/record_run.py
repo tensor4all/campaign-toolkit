@@ -27,6 +27,7 @@ import csv
 import datetime
 import fcntl
 import hashlib
+import json
 import os
 import pathlib
 import platform
@@ -99,14 +100,17 @@ def host_info(profile_name, profiles):
     }
 
 
-def vendor_identity(binary, env):
+def vendor_identity(binary, env, threads=None):
     """`<binary> info` -> the vendor's own account of what was linked.
 
     Read from the binary that will be measured, executed directly the way the
     recorder executes it, so a loader or link problem shows up here rather than
     halfway through a timing pass.
     """
-    out = subprocess.run([str(binary), "info"], capture_output=True, text=True, env=env)
+    command = [str(binary), 'info']
+    if threads is not None:
+        command += ['--threads', str(threads)]
+    out = subprocess.run(command, capture_output=True, text=True, env=env)
     if out.returncode != 0:
         sys.exit(f"ERROR: {binary} info failed: {out.stderr.strip()}")
     fields = {}
@@ -246,9 +250,11 @@ def main(argv=None, root=None):
     if d.has_upstream:
         ap.add_argument("--upstream", default=str(d.checkout_dir("upstream")),
                         help="the baseline checkout the harness links by path")
-    ap.add_argument("--reps", type=int, default=5)
-    ap.add_argument("--aa", type=int, default=1, help="number of complete set repeats (>=2 gives A/A)")
-    ap.add_argument("--prime-ms", type=int, default=500)
+    timing = d.get('timing') or {}
+    v2 = timing.get('version') == 2
+    ap.add_argument("--reps", type=int, default=timing.get('reps', 5))
+    ap.add_argument("--aa", type=int, default=timing.get('aa', 1), help="number of complete process-set repeats")
+    ap.add_argument("--prime-ms", type=int, default=timing.get('prime_ms', 500))
     ap.add_argument("--regimes", default=None, help="override, comma separated")
     ap.add_argument("--families", default=None,
                     help="override: measure only these families (comma separated). The run records the "
@@ -263,6 +269,8 @@ def main(argv=None, root=None):
                     help="which vendor arm to record: one binary links one vendor library, so an arm "
                          "is its own run. Required when the suite declares more than one.")
     ap.add_argument("--label", default=None, help="suffix for the run directory")
+    ap.add_argument('--no-publish', action='store_true',
+                    help='retain and validate run artifacts without publishing a result page')
     args = ap.parse_args(argv)
 
     profiles = d.profiles()
@@ -302,6 +310,20 @@ def main(argv=None, root=None):
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
+    if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
+        sys.exit('ERROR: repetitions, process sets and priming must be positive')
+    toolkit = None
+    harness = {'commit': git(d.root, 'rev-parse', 'HEAD'),
+               'dirty': bool(git(d.root, 'status', '--porcelain', '--untracked-files=no'))}
+    if v2:
+        if args.reps < 2 or args.aa < len(engines) or args.aa % len(engines):
+            sys.exit('ERROR: v2 needs >=2 calls and complete engine-order rotation cycles')
+        toolkit_root = pathlib.Path(__file__).resolve().parent.parent
+        toolkit = {'commit': git(toolkit_root, 'rev-parse', 'HEAD'),
+                   'dirty': bool(git(toolkit_root, 'status', '--porcelain', '--untracked-files=normal')),
+                   'measured_path': str(toolkit_root)}
+        if toolkit['dirty'] or harness['dirty']:
+            sys.exit('ERROR: v2 requires clean, committed toolkit and harness source')
 
     # One measurement at a time, and no build while a measurement runs. Taken
     # before the build and held for the whole run.
@@ -318,6 +340,8 @@ def main(argv=None, root=None):
     upstream = pathlib.Path(args.upstream) if d.has_upstream else None
     pin = build(checkout, arm, upstream)
     rev, dirty = pin[pin_env["rev"]], pin[pin_env["dirty"]] == "true"
+    if v2 and (dirty or (d.has_upstream and pin[d.upstream['pin_env']['dirty']] == 'true')):
+        sys.exit('ERROR: v2 requires clean committed library checkouts')
     if dirty:
         print("WARNING: the measured checkout is dirty; this cell will be marked dirty", file=sys.stderr)
     upstream_block = None
@@ -339,6 +363,16 @@ def main(argv=None, root=None):
 
     bin_dir = pathlib.Path(pin[pin_env.get("bin_dir", "BIN_DIR")])
     binary = bin_dir / d.measured["binary"]
+    binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest() if v2 else None
+    if v2:
+        (run_dir / 'build-info.json').write_text(json.dumps({
+            'pin': pin,
+            'rustc': sh(['rustc', '-vV']).stdout,
+            'cargo': sh(['cargo', '-vV']).stdout,
+            'env': {key: value for key, value in os.environ.items()
+                    if key in ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_BUILD_TARGET', 'CC', 'CFLAGS')
+                    or key.startswith('CARGO_PROFILE_')},
+        }, indent=2) + '\n')
     pinned = protocol_script(checkout, "pinned.sh")
     idle = protocol_script(checkout, "idle_cpus.py")
     if not pinned.exists() or not idle.exists():
@@ -354,7 +388,9 @@ def main(argv=None, root=None):
 
     # What the harness reports it linked decides the manifest, not what was asked for: the arm
     # and the binary have to agree, or the run is not recorded at all.
-    identity = vendor_identity(binary, env)
+    identity = vendor_identity(binary, env, threads[0] if v2 else None)
+    if v2:
+        (run_dir / 'binary-info.txt').write_text('\n'.join(f'{k}={v}' for k, v in identity.items()) + '\n')
     if identity.get("vendor.name") != arm:
         sys.exit(f"ERROR: this run records the {arm} arm, but the harness built for it reports "
                  f"{identity.get('vendor.name')!r}; a page may not name a vendor the binary did "
@@ -362,6 +398,7 @@ def main(argv=None, root=None):
 
     guards = []
     csvs = []
+    verification_files = []
 
     # 1. correctness first, for the whole covered grid, at every budget.
     for population in covered:
@@ -374,7 +411,9 @@ def main(argv=None, root=None):
                                 "--n", ",".join(population["n"]),
                                 "--batch", ",".join(str(b) for b in population["batch"]),
                                 "--dtype", ",".join(dtypes),
-                                "--family", ",".join(population["families"])],
+                                "--family", ",".join(population["families"]),
+                                *(['--regime', population['regime'], '--csv', str(run_dir / f'{stem}.csv')]
+                                  if v2 else [])],
                                env=env, capture_output=True, text=True)
             out.write_text(r.stdout)
             guard.write_text(r.stderr)
@@ -383,6 +422,8 @@ def main(argv=None, root=None):
                 sys.exit(f"ERROR: verify failed for {population['regime']} {t}T (see {out}); nothing published")
             if "all comparisons within tolerance" not in r.stdout:
                 sys.exit(f"ERROR: verify did not report a clean grid for {population['regime']} {t}T")
+            if v2:
+                verification_files.append(f'{stem}.csv')
 
     # 2. timing, one CSV per (repeat, population, threads).
     for rep in range(args.aa):
@@ -397,6 +438,8 @@ def main(argv=None, root=None):
                                     "--family", ",".join(population["families"]),
                                     "--regime", population["regime"],
                                     "--reps", str(args.reps), "--prime-ms", str(args.prime_ms),
+                                    *(['--statistic', 'median', '--rotate-rows', str(rep % len(engines))]
+                                      if v2 else []),
                                     "--csv", str(run_dir / f"{stem}.csv")],
                                    env=env, capture_output=True, text=True)
                 (run_dir / f"{stem}.guard").write_text(r.stderr)
@@ -415,6 +458,17 @@ def main(argv=None, root=None):
             entry["skipped"] = sorted(skipped[population["regime"]])
         recorded.append(entry)
 
+    if v2:
+        if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
+            sys.exit('ERROR: measured binary changed during recording')
+        sources = [(d.root, harness['commit']), (toolkit_root, toolkit['commit']),
+                   (pin[pin_env['dir']], rev)]
+        if upstream_block:
+            sources.append((upstream_block['measured_path'], upstream_block['commit']))
+        for source, commit in sources:
+            if (git(source, 'rev-parse', 'HEAD') != commit
+                    or git(source, 'status', '--porcelain', '--untracked-files=no')):
+                sys.exit(f'ERROR: measured source changed during recording: {source}')
     manifest = {
         "schema_version": 1,
         "target_profile": args.profile,
@@ -433,10 +487,9 @@ def main(argv=None, root=None):
         },
         **({"upstream": upstream_block} if upstream_block else {}),
         "vendor": vendor_block(identity, pin.get(pin_env.get("env", "BUILD_ENV"))),
-        "harness": {
-            "commit": git(d.root, "rev-parse", "HEAD"),
-            "dirty": bool(git(d.root, "status", "--porcelain", "--untracked-files=no")),
-        },
+        "harness": harness,
+        **({'toolkit': toolkit, 'verification_files': verification_files,
+            'binary': {'path': str(binary), 'sha256': binary_sha256}} if v2 else {}),
         "host": host_info(args.profile, profiles),
         "threads": {
             "counts": threads,
@@ -447,12 +500,15 @@ def main(argv=None, root=None):
                     "measured process's environment so it cannot inherit a different one",
         },
         "timing_policy": {
-            "version": 1,
+            "version": 2 if v2 else 1,
             "minimum_untimed_priming_ms": args.prime_ms,
-            "statistic": "best",
+            "statistic": "median" if v2 else "best",
+            **({'row_rotation_step': 1} if v2 else {}),
             "repetitions": args.reps,
-            "notes": "priming is time-based, not a call count: after an idle gate this host "
-                     "reads low for the first second or two of sustained work",
+            "notes": ("descriptive process medians under a rotating engine-order schedule; "
+                      "raw samples and the verification census are retained" if v2 else
+                      "priming is time-based, not a call count: after an idle gate this host "
+                      "reads low for the first second or two of sustained work"),
         },
         "guards": {
             "idle_window_seconds": int(os.environ.get("PINNED_IDLE_SECONDS", 3)),
@@ -490,7 +546,8 @@ def main(argv=None, root=None):
                     "--run-dir", str(run_dir)],
                    env=dict(os.environ, CAMPAIGN_ROOT=str(d.root)),
                    cwd=str(pathlib.Path(__file__).resolve().parent.parent), check=True)
-    descriptor.run_module("publish_report", [str(run_dir)], root=d.root)
+    if not args.no_publish:
+        descriptor.run_module("publish_report", [str(run_dir)], root=d.root)
     return 0
 
 

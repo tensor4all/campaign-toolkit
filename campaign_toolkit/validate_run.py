@@ -227,6 +227,14 @@ def validate(path, check_git=True):
         else:
             check_declaration(manifest, suite, spec_of(suite), errors)
 
+    check_result_rows(path, manifest, errors)
+    if manifest['timing_policy']['version'] == 2:
+        from . import timing_evidence
+        try:
+            timing_evidence.validate(manifest, pathlib.Path(path).parent)
+        except (ValueError, KeyError, OSError) as error:
+            errors.append(f"v2 timing evidence: {error}")
+
     if check_git:
         check_commit("library", manifest.get("library") or {}, errors)
         if manifest.get("upstream"):
