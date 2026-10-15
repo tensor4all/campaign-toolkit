@@ -428,6 +428,10 @@ def main(argv=None, root=None):
     ap.add_argument("--families", default=None,
                     help="override: measure only these families (comma separated). The run records the "
                          "subset it covered, so a partial population is visible rather than implied.")
+    ap.add_argument("--shapes", default=None,
+                    help="override: measure only these declared shapes (comma separated). The run records "
+                         "the shapes it covered, so a one-size-per-tier daily run is visible as a subset "
+                         "rather than implied to be the whole grid.")
     ap.add_argument("--threads", default=None, help="override, comma separated")
     ap.add_argument("--dtypes", default=None)
     ap.add_argument("--engines", default=None,
@@ -458,6 +462,14 @@ def main(argv=None, root=None):
             sys.exit(f"ERROR: {sorted(unknown)} are not declared by this suite")
         covered = [dict(p, families=[f for f in p["families"] if f in wanted]) for p in covered]
         covered = [p for p in covered if p["families"]]
+    if args.shapes:
+        wanted = set(args.shapes.split(","))
+        declared_shapes = {s for p in declared for s in p["n"]}
+        unknown = wanted - declared_shapes
+        if unknown:
+            sys.exit(f"ERROR: {sorted(unknown)} are not declared by this suite")
+        covered = [dict(p, n=[s for s in p["n"] if s in wanted]) for p in covered]
+        covered = [p for p in covered if p["n"]]
     threads = [int(t) for t in args.threads.split(",")] if args.threads else spec["threads"]
     dtypes = args.dtypes.split(",") if args.dtypes else spec["dtypes"]
     # A declared case axis -- the memory order, in the campaigns that declare one. It is part
