@@ -64,7 +64,9 @@ def validate(manifest, run_dir):
     engines = spec['engines']
     if policy['statistic'] != 'median' or repetitions < 2:
         raise ValueError('v2 requires median and at least two timed calls per row')
-    if repeats < len(engines) or repeats % len(engines) or policy.get('row_rotation_step') != 1:
+    if repeats < 2:
+        raise ValueError('v2 requires at least two complete process sets')
+    if not engines or repeats % len(engines) or policy.get('row_rotation_step') != 1:
         raise ValueError('v2 requires complete engine-order rotation cycles')
     run_dir = pathlib.Path(run_dir)
 

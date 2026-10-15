@@ -69,6 +69,21 @@ class TimingEvidenceTest(unittest.TestCase):
         self.assertEqual(timing_evidence.samples(self.rows('run0-small-1t.csv')[0], 2), [1, 3])
 
     def test_v2_report_uses_process_medians_and_distinct_variants(self):
+        # The fixture deliberately has no configured case_axes. Validated C/F
+        # cells must still have separate report keys, tables and process SDs.
+        self.manifest['run_spec']['order'].append('f')
+        for name in self.manifest['verification_files'] + self.manifest['result_files']:
+            rows = self.rows(name)
+            other_order = []
+            for row in rows:
+                other = row | {'order': 'f'}
+                if row['status'] == 'ok' and row['samples_ms']:
+                    other |= {'samples_ms': json.dumps([v + 10 for v in json.loads(row['samples_ms'])]),
+                              'total_ms': str(float(row['total_ms']) + 10),
+                              'per_item_us': str(float(row['per_item_us']) + 10000)}
+                other_order.append(other)
+            self.write(name, rows + other_order)
+        self.validate()
         fixture = pathlib.Path(__file__).parent / 'fixture'
         shutil.copytree(fixture / 'benchmarks', self.root / 'benchmarks')
         descriptor.set_root(self.root)
@@ -80,16 +95,37 @@ class TimingEvidenceTest(unittest.TestCase):
         suite = yaml.safe_load((fixture / 'benchmarks/suites/fixture-kernels.yaml').read_text())
         rows = report_run.read_rows([self.root / name for name in self.manifest['result_files']])
         best, _, within = report_run.best_per_case(rows, manifest['timing_policy'])
-        self.assertEqual(best[('small', 'mul/n2/b1 [block]', 'f64', 1)]['candidate'], [2, 3, 4])
-        self.assertEqual(len(within[('small', 'mul/n2/b1 [block]', 'f64', 1)]['candidate']), 3)
+        self.assertEqual(len(best), 4)  # Two variants, two orders.
+        self.assertEqual(best[('small', 'mul/n2/b1 [block]', 'f64', 'c', 1)]['candidate'], [2, 3, 4])
+        self.assertEqual(best[('small', 'mul/n2/b1 [block]', 'f64', 'f', 1)]['candidate'], [12, 13, 14])
+        self.assertEqual(len(within[('small', 'mul/n2/b1 [block]', 'f64', 'c', 1)]['candidate']), 3)
         text = report_run.render(manifest, suite, rows, self.root)
         self.assertIn('3 ± 1', text)
+        self.assertIn('13 ± 1', text)
+        self.assertIn('c order', text)
+        self.assertIn('f order', text)
         self.assertIn('[block]', text)
         self.assertIn('[sequence]', text)
         self.assertNotIn('A comparison is made from paired repeats', text)
+        self.assertEqual(report_run.report_axes(rows, {'version': 1}), ())
+        orderless = [{k: v for k, v in row.items() if k != 'order'} for row in rows]
+        self.assertEqual(report_run.report_axes(orderless, manifest['timing_policy']), ())
         self.assertEqual(campaign.page_name_values(manifest)['timing'], '-timing-v2')
         manifest['timing_policy']['version'] = 1
         self.assertEqual(campaign.page_name_values(manifest)['timing'], '')
+
+    def test_single_engine_still_requires_two_processes(self):
+        for name in self.manifest['verification_files'] + self.manifest['result_files']:
+            self.write(name, [row for row in self.rows(name) if row['row'] == 'candidate'])
+        manifest = copy.deepcopy(self.manifest)
+        manifest['run_spec']['engines'] = ['candidate']
+        manifest['run_spec']['aa'] = 1
+        manifest['result_files'] = manifest['result_files'][:1]
+        with self.assertRaisesRegex(ValueError, 'at least two complete process sets'):
+            self.validate(manifest)
+        manifest['run_spec']['aa'] = 2
+        manifest['result_files'] = self.manifest['result_files'][:2]
+        self.validate(manifest)
 
     def test_legacy_revision_comparison_refuses_v2(self):
         (self.root / 'run.yaml').write_text(yaml.safe_dump(self.manifest))

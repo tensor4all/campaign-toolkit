@@ -95,15 +95,20 @@ A campaign can opt into `timing: {version: 2}` and optionally declare validated
 output, explicit row rotation, observed thread-budget columns, and a verification
 CSV census. The recorder requires clean committed library/harness/toolkit source.
 V2 validation rejects incomplete or duplicate process/cell/variant coverage and
-inconsistent aggregates. Reports show medians with separate within-process and
-scheduled between-process sample SD, not best-of-repeats or confidence intervals.
+inconsistent aggregates. At least two process sets and complete engine-rotation
+cycles are required, even for a single engine. Reports always separate C/F order
+in v2, including when omitted from a campaign's display axes. They show medians
+with separate within-process and scheduled between-process sample SD, not
+best-of-repeats or confidence intervals.
 `{timing}` in `page_name` keeps revised-contract pages separate from historical v1.
 For v2 recording, install the toolkit **editable from its own Git checkout**
 (e.g. `pip install -e ../campaign-toolkit`). A wheel or ordinary non-editable VCS
 installation does not retain the required source identity; an enclosing campaign
 Git repository is not a substitute. A pinned pip VCS requirement can use
 `-e git+https://github.com/tensor4all/campaign-toolkit@COMMIT#egg=campaign-toolkit`.
-V1 readers/recorders do not acquire this Git-checkout prerequisite.
+V1 readers/recorders do not acquire this Git-checkout prerequisite. The early
+`build-info.json` retains admission identities/argv and binary SHA-256 even when
+verification or timing subsequently fails.
 
 Existing campaigns/manifests without this opt-in retain v1 rendering. The legacy
 revision-comparison command explicitly refuses v2 rather than pool variants or

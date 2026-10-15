@@ -24,9 +24,9 @@ def columns():
 def read_rows(csv_paths):
     """Rows from the run CSVs, tagged with the repeat they came from.
 
-    A repeat is one complete pass over the declared populations; the harness
-    already reduced `--reps` timed iterations to a best time, so a repeat holds
-    one number per (case, engine row).
+    A repeat is one complete pass over the declared populations. Legacy rows
+    contain a best time; v2 retains chronological calls whose per-process median
+    is re-derived during reporting.
     """
     cols = columns()
     rows = []
@@ -49,13 +49,21 @@ def case_name(row, variants=False):
     return name + (f" [{row['note']}]" if variants and row.get('note') else '')
 
 
+def report_axes(rows, policy):
+    axes = descriptor.current().case_axes
+    # V2 validates order even when the campaign omitted it from its display axes.
+    if policy and policy['version'] == 2 and 'order' not in axes and any(r.get('order') for r in rows):
+        return [*axes, 'order']
+    return axes
+
+
 def best_per_case(rows, policy=None):
     """(regime, case, dtype, *axes, threads) -> engine row -> times, and skipped cases.
 
     A declared case axis is part of the key, so a cell of one order is never pooled with
     the same shape of another.
     """
-    axes = descriptor.current().case_axes
+    axes = report_axes(rows, policy)
     best, skipped, within = {}, {}, {}
     v2 = policy is not None and policy['version'] == 2
     for row in rows:
@@ -92,6 +100,7 @@ def provider_text(prov):
 
 def render(manifest, suite, rows, run_dir):
     d = descriptor.current()
+    axes = report_axes(rows, manifest['timing_policy'])
     report = d.report
     vendor = manifest.get("vendor") or {}
     library = manifest["library"]
@@ -206,12 +215,12 @@ def render(manifest, suite, rows, run_dir):
         # axis still gets its tables split by what its rows actually carry, so two values of
         # an axis are never pooled into one table.
         axis_values_lists = [(manifest["run_spec"].get(axis) or sorted({row[axis] for row in rows}))
-                             for axis in d.case_axes]
+                             for axis in axes]
         for dtype in manifest["run_spec"]["dtypes"]:
             for axis_values in itertools.product(*axis_values_lists):
                 for threads in manifest["threads"]["counts"]:
                     section = ", ".join([regime, dtype]
-                                        + [f"{v} {a}" for v, a in zip(axis_values, d.case_axes)]
+                                        + [f"{v} {a}" for v, a in zip(axis_values, axes)]
                                         + [f"{threads}T"])
                     head = 3 + len(axis_values)
                     cases = sorted({k[1] for k in best

@@ -331,8 +331,8 @@ def main(argv=None, root=None):
     harness = {'commit': git(d.root, 'rev-parse', 'HEAD'),
                'dirty': bool(git(d.root, 'status', '--porcelain', '--untracked-files=no'))}
     if v2:
-        if args.reps < 2 or args.aa < len(engines) or args.aa % len(engines):
-            sys.exit('ERROR: v2 needs >=2 calls and complete engine-order rotation cycles')
+        if args.reps < 2 or args.aa < 2 or not engines or args.aa % len(engines):
+            sys.exit('ERROR: v2 needs >=2 calls, >=2 process sets and complete engine-order rotation cycles')
         toolkit_root = pathlib.Path(__file__).resolve().parent.parent
         toolkit = toolkit_identity(toolkit_root)
         if toolkit['dirty'] or harness['dirty']:
@@ -380,6 +380,8 @@ def main(argv=None, root=None):
     if v2:
         (run_dir / 'build-info.json').write_text(json.dumps({
             'pin': pin,
+            'admission': {'harness': harness, 'toolkit': toolkit, 'argv': list(sys.argv)},
+            'binary': {'path': str(binary), 'sha256': binary_sha256},
             'rustc': sh(['rustc', '-vV']).stdout,
             'cargo': sh(['cargo', '-vV']).stdout,
             'env': {key: value for key, value in os.environ.items()

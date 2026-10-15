@@ -268,7 +268,7 @@
       "required": ["version"],
       "properties": {
         "version": {"enum": [2]},
-        "aa": {"type": "integer", "minimum": 3},
+        "aa": {"type": "integer", "minimum": 2},
         "reps": {"type": "integer", "minimum": 2},
         "prime_ms": {"type": "integer", "minimum": 1}
       }
