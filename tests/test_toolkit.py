@@ -118,6 +118,9 @@ class FixtureCampaignTest(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
 
             with (mock.patch.object(record_run, 'build', return_value=pin),
+                  # The fixture asserts the pipeline, not the host's power state: a CI runner with
+                  # turbo enabled must not decide whether this test can run.
+                  mock.patch.object(record_run, 'boost_state', return_value={}),
                   mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
                   mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
                                     original['library']['commit'] if args[0] == 'rev-parse' else ''),
