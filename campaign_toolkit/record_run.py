@@ -27,6 +27,7 @@ import csv
 import datetime
 import fcntl
 import hashlib
+import json
 import os
 import pathlib
 import platform
@@ -50,6 +51,158 @@ def sh(cmd, **kw):
 def git(dir_, *args):
     return subprocess.run(["git", "-C", str(dir_), *args], check=True,
                           text=True, capture_output=True).stdout.strip()
+
+
+def parse_cpu_list(text):
+    cpus = set()
+    for part in str(text).split(","):
+        if not part:
+            continue
+        if "-" in part:
+            low, high = part.split("-")
+            cpus.update(range(int(low), int(high) + 1))
+        else:
+            cpus.add(int(part))
+    return cpus
+
+
+def sysfs_cpu_list(path):
+    return parse_cpu_list(path.read_text()) if path.exists() else set()
+
+
+def l3_domain(cpu):
+    """The CPUs sharing `cpu`'s last-level cache, `cpu` included."""
+    return sysfs_cpu_list(pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/cache/index3/shared_cpu_list")) or {cpu}
+
+
+def online_cpus():
+    return sysfs_cpu_list(pathlib.Path("/sys/devices/system/cpu/online")) or set(os.sched_getaffinity(0))
+
+
+def measured_cpus(cpu_sets):
+    """The declared measured CPUs plus their SMT siblings: a busy sibling contends for the core."""
+    measured = set()
+    for spec in cpu_sets.values():
+        for cpu in parse_cpu_list(spec):
+            measured |= sysfs_cpu_list(pathlib.Path(
+                f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list")) or {cpu}
+    return measured
+
+
+def observer_cpus(cpu_sets):
+    """CPUs outside every L3 domain a measured CPU belongs to: where the observing side belongs."""
+    domains = set()
+    for spec in cpu_sets.values():
+        for cpu in parse_cpu_list(spec):
+            domains |= l3_domain(cpu)
+    return online_cpus() - domains
+
+
+def warn_if_measured_cpus_span_l3_domains(cpu_sets):
+    """A measured set may span L3 domains; say so, because every touched domain must stay quiet.
+
+    Legitimate measurements can need more cores than one last-level cache serves, so spanning is
+    not refused. What must not happen silently is a set that fills only part of several domains:
+    the idle guard watches every domain the measurement touches (cache peers as well as SMT
+    siblings), and unrelated work on the free cores of a touched domain would contend for the same
+    cache. This is a warning to the operator, not a validity rule.
+    """
+    for threads, spec in cpu_sets.items():
+        domains = {frozenset(l3_domain(cpu)) for cpu in parse_cpu_list(spec)}
+        if len(domains) > 1:
+            print(f"warning: the {threads}T CPU set {spec!r} spans the L3 domains "
+                  f"{sorted(sorted(d) for d in domains)}; every CPU in those domains is watched by "
+                  f"the idle guard, so the whole domains - not only the measured cores - must stay "
+                  f"idle for the run to be admitted", file=sys.stderr)
+
+
+def require_observer_off_measured_cpus(cpu_sets):
+    """Refuse to record from a process that may be scheduled onto a measured CPU.
+
+    Keeping unrelated work off the measured cores is an operator precondition, not something the
+    idle guard can repair after the fact: this process is the observer, and its children inherit
+    its affinity, so an unpinned recorder can land on the very cores it measures. Fail before the
+    build rather than record a number nobody can trust. The suggested pin is derived from this
+    machine's topology, not from a hardcoded CPU list.
+    """
+    measured = measured_cpus(cpu_sets)
+    free_cpus = observer_cpus(cpu_sets)
+    mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
+    shared = sorted(mine & measured)
+    if shared:
+        free = ", ".join(f"{low}" if high == low else f"{low}-{high}"
+                         for low, high in ranges(sorted(free_cpus)))
+        sys.exit(f"ERROR: this recording process may run on measured CPUs {shared} "
+                 f"(measured set with siblings: {sorted(measured)}); pin the observing side off the "
+                 f"measured L3 domain, for example `taskset -c {free or '?'} python3 <recorder> ...`")
+    if not free_cpus:
+        # A machine with a single L3 domain (a small CI runner, a laptop with one CCX) cannot
+        # separate the observer from the measurement. That is a fact about the host, not an
+        # operator error, so it is recorded as a warning instead of refused.
+        print("warning: no CPU lies outside the measured L3 domains on this host, so the observing "
+              "side shares them with the measurement; the residual contention is recorded here and "
+              "in the run's provenance, not removed", file=sys.stderr)
+
+
+def ranges(cpus):
+    out = []
+    for cpu in cpus:
+        if out and cpu == out[-1][1] + 1:
+            out[-1][1] = cpu
+        else:
+            out.append([cpu, cpu])
+    return out
+
+
+def boost_state():
+    """The boost/turbo switches this host exposes, read as `{name: raw value}`."""
+    state = {}
+    for name, path in (("cpufreq_boost", "/sys/devices/system/cpu/cpufreq/boost"),
+                       ("intel_pstate_no_turbo", "/sys/devices/system/cpu/intel_pstate/no_turbo")):
+        node = pathlib.Path(path)
+        try:
+            if node.exists():
+                state[name] = node.read_text().strip()
+        except OSError:
+            pass
+    return state
+
+
+def require_boost_disabled(state=None):
+    """Refuse to measure while a boost switch is on: frequency is part of the measurement.
+
+    A boost that is on for one process start and throttled for the next moves the level between
+    starts. On this campaign's host the process-median range of `cholesky` 512^2 f64 8T collapsed
+    from 40-73% to 1.5-5% once boost was disabled, so a run with boost on is not comparable with a
+    run without it. `FBENCH_ALLOW_BOOST=1` records the deviation instead of refusing, for hosts
+    where the switch cannot be changed.
+    """
+    state = boost_state() if state is None else state
+    on = [f"{name}={value}" for name, value in sorted(state.items())
+          if (name == "cpufreq_boost" and value == "1") or (name == "intel_pstate_no_turbo" and value == "0")]
+    if not on:
+        return
+    if os.environ.get("FBENCH_ALLOW_BOOST") != "1":
+        sys.exit("ERROR: CPU boost/turbo is enabled (" + ", ".join(on) + "); disable it before "
+                 "measuring, for example `echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost`, "
+                 "or set FBENCH_ALLOW_BOOST=1 to record the deviation explicitly")
+    print(f"warning: FBENCH_ALLOW_BOOST=1 - boost is on ({', '.join(on)}); the frequency level is "
+          f"not fixed, and these numbers are not comparable with boost-off runs", file=sys.stderr)
+
+
+def toolkit_identity(root):
+    """V2 needs this package's own Git checkout, not an enclosing campaign repo."""
+    root = pathlib.Path(root).resolve()
+    try:
+        own_root = pathlib.Path(git(root, 'rev-parse', '--show-toplevel')).resolve()
+    except subprocess.CalledProcessError:
+        own_root = None
+    if own_root != root:
+        sys.exit('ERROR: v2 recording requires an editable toolkit install from its own '
+                 'Git checkout; an installed distribution has no usable source identity')
+    return {'commit': git(root, 'rev-parse', 'HEAD'),
+            'dirty': bool(git(root, 'status', '--porcelain', '--untracked-files=normal')),
+            'measured_path': str(root)}
 
 
 def build(checkout, vendor, upstream=None):
@@ -87,7 +240,23 @@ def host_info(profile_name, profiles):
                     if line.startswith("CPU(s):")), 0)
     l3 = next((line.split(":", 1)[1].strip() for line in lscpu.splitlines()
                if line.startswith("L3 cache:")), None)
+    power = {}
+    for name, path in (("cpufreq_boost", "/sys/devices/system/cpu/cpufreq/boost"),
+                       ("intel_no_turbo", "/sys/devices/system/cpu/intel_pstate/no_turbo"),
+                       ("amd_pstate_status", "/sys/devices/system/cpu/amd_pstate/status"),
+                       ("platform_profile", "/sys/firmware/acpi/platform_profile"),
+                       ("governor", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+                       ("energy_performance_preference",
+                        "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference"),
+                       ("scaling_max_freq_khz", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")):
+        node = pathlib.Path(path)
+        try:
+            if node.exists():
+                power[name] = node.read_text().strip()
+        except OSError:
+            pass
     return {
+        "power": power or None,
         "hostname": platform.node(),
         "cpu": profile["cpu"],
         "os": f"{platform.system()} {platform.release()}",
@@ -99,14 +268,17 @@ def host_info(profile_name, profiles):
     }
 
 
-def vendor_identity(binary, env):
+def vendor_identity(binary, env, threads=None):
     """`<binary> info` -> the vendor's own account of what was linked.
 
     Read from the binary that will be measured, executed directly the way the
     recorder executes it, so a loader or link problem shows up here rather than
     halfway through a timing pass.
     """
-    out = subprocess.run([str(binary), "info"], capture_output=True, text=True, env=env)
+    command = [str(binary), 'info']
+    if threads is not None:
+        command += ['--threads', str(threads)]
+    out = subprocess.run(command, capture_output=True, text=True, env=env)
     if out.returncode != 0:
         sys.exit(f"ERROR: {binary} info failed: {out.stderr.strip()}")
     fields = {}
@@ -246,13 +418,19 @@ def main(argv=None, root=None):
     if d.has_upstream:
         ap.add_argument("--upstream", default=str(d.checkout_dir("upstream")),
                         help="the baseline checkout the harness links by path")
-    ap.add_argument("--reps", type=int, default=5)
-    ap.add_argument("--aa", type=int, default=1, help="number of complete set repeats (>=2 gives A/A)")
-    ap.add_argument("--prime-ms", type=int, default=500)
+    timing = d.get('timing') or {}
+    v2 = timing.get('version') == 2
+    ap.add_argument("--reps", type=int, default=timing.get('reps', 5))
+    ap.add_argument("--aa", type=int, default=timing.get('aa', 1), help="number of complete process-set repeats")
+    ap.add_argument("--prime-ms", type=int, default=timing.get('prime_ms', 500))
     ap.add_argument("--regimes", default=None, help="override, comma separated")
     ap.add_argument("--families", default=None,
                     help="override: measure only these families (comma separated). The run records the "
                          "subset it covered, so a partial population is visible rather than implied.")
+    ap.add_argument("--shapes", default=None,
+                    help="override: measure only these declared shapes (comma separated). The run records "
+                         "the shapes it covered, so a one-size-per-tier daily run is visible as a subset "
+                         "rather than implied to be the whole grid.")
     ap.add_argument("--threads", default=None, help="override, comma separated")
     ap.add_argument("--dtypes", default=None)
     ap.add_argument("--engines", default=None,
@@ -263,6 +441,8 @@ def main(argv=None, root=None):
                     help="which vendor arm to record: one binary links one vendor library, so an arm "
                          "is its own run. Required when the suite declares more than one.")
     ap.add_argument("--label", default=None, help="suffix for the run directory")
+    ap.add_argument('--no-publish', action='store_true',
+                    help='retain and validate run artifacts without publishing a result page')
     args = ap.parse_args(argv)
 
     profiles = d.profiles()
@@ -281,6 +461,14 @@ def main(argv=None, root=None):
             sys.exit(f"ERROR: {sorted(unknown)} are not declared by this suite")
         covered = [dict(p, families=[f for f in p["families"] if f in wanted]) for p in covered]
         covered = [p for p in covered if p["families"]]
+    if args.shapes:
+        wanted = set(args.shapes.split(","))
+        declared_shapes = {s for p in declared for s in p["n"]}
+        unknown = wanted - declared_shapes
+        if unknown:
+            sys.exit(f"ERROR: {sorted(unknown)} are not declared by this suite")
+        covered = [dict(p, n=[s for s in p["n"] if s in wanted]) for p in covered]
+        covered = [p for p in covered if p["n"]]
     threads = [int(t) for t in args.threads.split(",")] if args.threads else spec["threads"]
     dtypes = args.dtypes.split(",") if args.dtypes else spec["dtypes"]
     # A declared case axis -- the memory order, in the campaigns that declare one. It is part
@@ -302,6 +490,21 @@ def main(argv=None, root=None):
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
+    warn_if_measured_cpus_span_l3_domains(cpu_sets)
+    require_observer_off_measured_cpus(cpu_sets)
+    require_boost_disabled()
+    if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
+        sys.exit('ERROR: repetitions, process sets and priming must be positive')
+    toolkit = None
+    harness = {'commit': git(d.root, 'rev-parse', 'HEAD'),
+               'dirty': bool(git(d.root, 'status', '--porcelain', '--untracked-files=no'))}
+    if v2:
+        if args.reps < 2 or args.aa < 2 or not engines or args.aa % len(engines):
+            sys.exit('ERROR: v2 needs >=2 calls, >=2 process sets and complete engine-order rotation cycles')
+        toolkit_root = pathlib.Path(__file__).resolve().parent.parent
+        toolkit = toolkit_identity(toolkit_root)
+        if toolkit['dirty'] or harness['dirty']:
+            sys.exit('ERROR: v2 requires clean, committed toolkit and harness source')
 
     # One measurement at a time, and no build while a measurement runs. Taken
     # before the build and held for the whole run.
@@ -318,6 +521,8 @@ def main(argv=None, root=None):
     upstream = pathlib.Path(args.upstream) if d.has_upstream else None
     pin = build(checkout, arm, upstream)
     rev, dirty = pin[pin_env["rev"]], pin[pin_env["dirty"]] == "true"
+    if v2 and (dirty or (d.has_upstream and pin[d.upstream['pin_env']['dirty']] == 'true')):
+        sys.exit('ERROR: v2 requires clean committed library checkouts')
     if dirty:
         print("WARNING: the measured checkout is dirty; this cell will be marked dirty", file=sys.stderr)
     upstream_block = None
@@ -339,6 +544,18 @@ def main(argv=None, root=None):
 
     bin_dir = pathlib.Path(pin[pin_env.get("bin_dir", "BIN_DIR")])
     binary = bin_dir / d.measured["binary"]
+    binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest() if v2 else None
+    if v2:
+        (run_dir / 'build-info.json').write_text(json.dumps({
+            'pin': pin,
+            'admission': {'harness': harness, 'toolkit': toolkit, 'argv': list(sys.argv)},
+            'binary': {'path': str(binary), 'sha256': binary_sha256},
+            'rustc': sh(['rustc', '-vV']).stdout,
+            'cargo': sh(['cargo', '-vV']).stdout,
+            'env': {key: value for key, value in os.environ.items()
+                    if key in ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_BUILD_TARGET', 'CC', 'CFLAGS')
+                    or key.startswith('CARGO_PROFILE_')},
+        }, indent=2) + '\n')
     pinned = protocol_script(checkout, "pinned.sh")
     idle = protocol_script(checkout, "idle_cpus.py")
     if not pinned.exists() or not idle.exists():
@@ -354,7 +571,9 @@ def main(argv=None, root=None):
 
     # What the harness reports it linked decides the manifest, not what was asked for: the arm
     # and the binary have to agree, or the run is not recorded at all.
-    identity = vendor_identity(binary, env)
+    identity = vendor_identity(binary, env, threads[0] if v2 else None)
+    if v2:
+        (run_dir / 'binary-info.txt').write_text('\n'.join(f'{k}={v}' for k, v in identity.items()) + '\n')
     if identity.get("vendor.name") != arm:
         sys.exit(f"ERROR: this run records the {arm} arm, but the harness built for it reports "
                  f"{identity.get('vendor.name')!r}; a page may not name a vendor the binary did "
@@ -362,6 +581,7 @@ def main(argv=None, root=None):
 
     guards = []
     csvs = []
+    verification_files = []
 
     # 1. correctness first, for the whole covered grid, at every budget.
     for population in covered:
@@ -374,7 +594,10 @@ def main(argv=None, root=None):
                                 "--n", ",".join(population["n"]),
                                 "--batch", ",".join(str(b) for b in population["batch"]),
                                 "--dtype", ",".join(dtypes),
-                                "--family", ",".join(population["families"])],
+                                "--family", ",".join(population["families"]),
+                                "--rows", ",".join(engines),
+                                *(['--regime', population['regime'], '--csv', str(run_dir / f'{stem}.csv')]
+                                  if v2 else [])],
                                env=env, capture_output=True, text=True)
             out.write_text(r.stdout)
             guard.write_text(r.stderr)
@@ -383,6 +606,8 @@ def main(argv=None, root=None):
                 sys.exit(f"ERROR: verify failed for {population['regime']} {t}T (see {out}); nothing published")
             if "all comparisons within tolerance" not in r.stdout:
                 sys.exit(f"ERROR: verify did not report a clean grid for {population['regime']} {t}T")
+            if v2:
+                verification_files.append(f'{stem}.csv')
 
     # 2. timing, one CSV per (repeat, population, threads).
     for rep in range(args.aa):
@@ -396,7 +621,10 @@ def main(argv=None, root=None):
                                     "--dtype", ",".join(dtypes),
                                     "--family", ",".join(population["families"]),
                                     "--regime", population["regime"],
+                                    "--rows", ",".join(engines),
                                     "--reps", str(args.reps), "--prime-ms", str(args.prime_ms),
+                                    *(['--statistic', 'median', '--rotate-rows', str(rep % len(engines))]
+                                      if v2 else []),
                                     "--csv", str(run_dir / f"{stem}.csv")],
                                    env=env, capture_output=True, text=True)
                 (run_dir / f"{stem}.guard").write_text(r.stderr)
@@ -415,6 +643,17 @@ def main(argv=None, root=None):
             entry["skipped"] = sorted(skipped[population["regime"]])
         recorded.append(entry)
 
+    if v2:
+        if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
+            sys.exit('ERROR: measured binary changed during recording')
+        sources = [(d.root, harness['commit']), (toolkit_root, toolkit['commit']),
+                   (pin[pin_env['dir']], rev)]
+        if upstream_block:
+            sources.append((upstream_block['measured_path'], upstream_block['commit']))
+        for source, commit in sources:
+            if (git(source, 'rev-parse', 'HEAD') != commit
+                    or git(source, 'status', '--porcelain', '--untracked-files=no')):
+                sys.exit(f'ERROR: measured source changed during recording: {source}')
     manifest = {
         "schema_version": 1,
         "target_profile": args.profile,
@@ -433,10 +672,9 @@ def main(argv=None, root=None):
         },
         **({"upstream": upstream_block} if upstream_block else {}),
         "vendor": vendor_block(identity, pin.get(pin_env.get("env", "BUILD_ENV"))),
-        "harness": {
-            "commit": git(d.root, "rev-parse", "HEAD"),
-            "dirty": bool(git(d.root, "status", "--porcelain", "--untracked-files=no")),
-        },
+        "harness": harness,
+        **({'toolkit': toolkit, 'verification_files': verification_files,
+            'binary': {'path': str(binary), 'sha256': binary_sha256}} if v2 else {}),
         "host": host_info(args.profile, profiles),
         "threads": {
             "counts": threads,
@@ -447,12 +685,15 @@ def main(argv=None, root=None):
                     "measured process's environment so it cannot inherit a different one",
         },
         "timing_policy": {
-            "version": 1,
+            "version": 2 if v2 else 1,
             "minimum_untimed_priming_ms": args.prime_ms,
-            "statistic": "best",
+            "statistic": "median" if v2 else "best",
+            **({'row_rotation_step': 1} if v2 else {}),
             "repetitions": args.reps,
-            "notes": "priming is time-based, not a call count: after an idle gate this host "
-                     "reads low for the first second or two of sustained work",
+            "notes": ("descriptive process medians under a rotating engine-order schedule; "
+                      "raw samples and the verification census are retained" if v2 else
+                      "priming is time-based, not a call count: after an idle gate this host "
+                      "reads low for the first second or two of sustained work"),
         },
         "guards": {
             "idle_window_seconds": int(os.environ.get("PINNED_IDLE_SECONDS", 3)),
@@ -490,8 +731,11 @@ def main(argv=None, root=None):
                     "--run-dir", str(run_dir)],
                    env=dict(os.environ, CAMPAIGN_ROOT=str(d.root)),
                    cwd=str(pathlib.Path(__file__).resolve().parent.parent), check=True)
-    descriptor.run_module("publish_report", [str(run_dir)], root=d.root)
-    return 0
+    code = 0
+    if not args.no_publish:
+        code = descriptor.run_module("publish_report", [str(run_dir)], root=d.root).returncode
+    lock.close()
+    return code
 
 
 if __name__ == "__main__":

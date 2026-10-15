@@ -43,11 +43,14 @@ def read(run_dir: pathlib.Path):
     anything else would compare numbers nothing gated.
     """
     import yaml
-    cols = columns()
     manifest_path = run_dir / "run.yaml"
     if not manifest_path.exists():
         sys.exit(f"{run_dir} has no run.yaml: a comparison needs to know what was measured")
     manifest = yaml.safe_load(manifest_path.read_text())
+    if manifest['timing_policy']['version'] != 1:
+        sys.exit('ERROR: revision comparison is not yet supported for timing policy v2; '
+                 'use the v2 reports and raw process distributions, not legacy minima')
+    cols = columns()
     listed = manifest.get("result_files") or []
     if not listed:
         sys.exit(f"{manifest_path} names no result files")

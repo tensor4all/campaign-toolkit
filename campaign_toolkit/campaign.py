@@ -216,6 +216,8 @@ def page_name_values(manifest: dict) -> dict:
         "version": f"-{library['version']}" if library.get("version") else "",
         "vendor": f"-{vendor}" if vendor else "",
         "dirty": "-dirty" if (library.get("dirty") or upstream.get("dirty")) else "",
+        "timing": (f"-timing-v{manifest['timing_policy']['version']}"
+                   if manifest.get('timing_policy', {}).get('version', 1) > 1 else ''),
     }
 
 

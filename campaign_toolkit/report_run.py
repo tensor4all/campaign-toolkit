@@ -9,6 +9,7 @@ into a discussion without its commit is the thing this repository exists to stop
 import argparse
 import csv
 import itertools
+import math
 import pathlib
 import statistics
 import sys
@@ -24,9 +25,9 @@ def columns():
 def read_rows(csv_paths):
     """Rows from the run CSVs, tagged with the repeat they came from.
 
-    A repeat is one complete pass over the declared populations; the harness
-    already reduced `--reps` timed iterations to a best time, so a repeat holds
-    one number per (case, engine row).
+    A repeat is one complete pass over the declared populations. Legacy rows
+    contain a best time; v2 retains chronological calls whose per-process median
+    is re-derived during reporting.
     """
     cols = columns()
     rows = []
@@ -43,21 +44,31 @@ def read_rows(csv_paths):
     return rows
 
 
-def case_name(row):
+def case_name(row, variants=False):
     shape = case_dims(int(row["m"]), int(row["n"]), row.get("k", ""))
-    return f"{row['family']}/{shape}/b{row['batch']}"
+    name = f"{row['family']}/{shape}/b{row['batch']}"
+    return name + (f" [{row['note']}]" if variants and row.get('note') else '')
 
 
-def best_per_case(rows):
+def report_axes(rows, policy):
+    axes = descriptor.current().case_axes
+    # V2 validates order even when the campaign omitted it from its display axes.
+    if policy and policy['version'] == 2 and 'order' not in axes and any(r.get('order') for r in rows):
+        return [*axes, 'order']
+    return axes
+
+
+def best_per_case(rows, policy=None):
     """(regime, case, dtype, *axes, threads) -> engine row -> times, and skipped cases.
 
     A declared case axis is part of the key, so a cell of one order is never pooled with
     the same shape of another.
     """
-    axes = descriptor.current().case_axes
-    best, skipped = {}, {}
+    axes = report_axes(rows, policy)
+    best, skipped, within, series = {}, {}, {}, {}
+    v2 = policy is not None and policy['version'] == 2
     for row in rows:
-        key = (row["regime"], case_name(row), row["dtype"],
+        key = (row["regime"], case_name(row, variants=v2), row["dtype"],
                *(row[a] for a in axes), int(row["threads"]))
         if row["status"] == "skipped":
             skipped.setdefault((row["regime"], int(row["threads"])), set()).add(
@@ -66,8 +77,100 @@ def best_per_case(rows):
         if row["status"] != "ok":
             continue
         times = best.setdefault(key, {}).setdefault(row["row"], [])
-        times.append(float(row["total_ms"]))
-    return best, skipped
+        if v2:
+            from .timing_evidence import samples
+            values = samples(row, policy['repetitions'])
+            times.append(statistics.median(values))
+            within.setdefault(key, {}).setdefault(row['row'], []).append(statistics.stdev(values))
+            # Kept by explicit repeat identity: a ratio joins two engines of one start, never two
+            # rows that merely happen to sit next to each other in a list.
+            series.setdefault((key, row['row']), {})[row['repeat']] = times[-1]
+        else:
+            times.append(float(row["total_ms"]))
+    return best, skipped, within, series
+
+
+def rotation_ratios(series, key, engines, fork):
+    """Rotation-averaged engine/fork ratio for one cell, and whether it is position-balanced.
+
+    The per-start ratios are averaged in log space, so the result is the geometric mean of the
+    ratios measured inside each process start. It removes a position effect only when every
+    declared engine has a measured row (each engine then visits every row position once) and only
+    under a position effect shared by the engines and stable across starts; the caller must keep
+    that qualifier and the per-start ratios visible.
+    """
+    ratios, detail = {}, {}
+    for engine in engines:
+        if engine == fork:
+            continue
+        first, second = series.get((key, fork)) or {}, series.get((key, engine)) or {}
+        shared = sorted(set(first) & set(second))
+        if len(shared) < 2:
+            ratios[engine] = None
+            continue
+        logs = [math.log(second[r]) - math.log(first[r]) for r in shared]
+        ratios[engine] = math.exp(statistics.fmean(logs))
+        detail[engine] = ' '.join(f'{math.exp(value):.3f}' for value in logs)
+    return ratios, detail
+
+
+def cell_statistics(series, key, engines):
+    """(position-balanced?, worst between-start relative range, position-effect ratio or None).
+
+    `between` is the largest relative range of a *single* engine's own per-start medians, so it
+    measures variation between process starts rather than the difference between engines.
+    `position` is exp(max - min) of the per-position mean log medians, and is defined only where
+    every declared engine has a measured row in every start (a real Latin square) and only for the
+    shared, start-invariant position model; it is None otherwise.
+    """
+    per_start = {engine: series.get((key, engine)) or {} for engine in engines}
+    balanced = all(per_start.values())
+    between = max(((max(values.values()) - min(values.values())) / statistics.median(values.values())
+                   for values in per_start.values()
+                   if len(values) > 1 and statistics.median(values.values()) > 0), default=0.0)
+    position = None
+    if balanced and len(engines) > 1 and len(per_start[engines[0]]) > 1:
+        means = {}
+        for repeat in per_start[engines[0]]:
+            try:
+                rotation = int(repeat[3:]) % len(engines)
+            except ValueError:
+                return balanced, between, None
+            order = engines[rotation:] + engines[:rotation]
+            for spot, engine in enumerate(order):
+                means.setdefault(spot, []).append(math.log(per_start[engine][repeat]))
+        if len(means) == len(engines):
+            values = [statistics.fmean(positions) for positions in means.values()]
+            position = math.exp(max(values) - min(values))
+    return balanced, between, position
+
+
+def spread_guide(best, within):
+    """Run-level noise guide computed from the run's own rows: what counts as spread here.
+
+    `within` is a descriptive spread read off the chronological calls, not a confidence interval,
+    and the between-start range includes the rotating-order schedule, so this is a reading aid that
+    lets a reader tell "this cell moved" from "this cell is noisy" without a model.
+    """
+    within_rel, between_rel, signal_rel = [], [], []
+    for key, per_engine in best.items():
+        for engine, medians in per_engine.items():
+            center = statistics.median(medians) if medians else 0.0
+            if center > 0:
+                sds = within.get(key, {}).get(engine, [])
+                within_rel += [sd / m for sd, m in zip(sds, medians) if m > 0]
+                if len(medians) > 1:
+                    between_rel.append((max(medians) - min(medians)) / center)
+                    if center >= 1e-3:      # >= 1 us: below that a row is timer/scheduler jitter
+                        signal_rel.append((max(medians) - min(medians)) / center)
+    return {
+        "within_median": statistics.median(within_rel) if within_rel else None,
+        "between_median": statistics.median(between_rel) if between_rel else None,
+        "between_worst": max(between_rel) if between_rel else None,
+        "between_worst_signal": max(signal_rel) if signal_rel else None,
+        "between_flagged": sum(1 for r in between_rel if r > 0.05),
+        "between_cells": len(between_rel),
+    }
 
 
 def provider_text(prov):
@@ -82,8 +185,72 @@ def provider_text(prov):
     return text
 
 
+VERDICT_FLOOR = 0.05        # a difference below this is not reported even when the starts agreed
+DISPATCH_US = 0.02          # below ~20 us/call the multi-thread rows pay thread-region start-up
+
+
+def comparison_verdict(best, within, key, row_names):
+    """One verdict per other engine: `(direction, ratio)` when the difference beats the band.
+
+    The band is the combined between-start spread of the two rows (sqrt of the two relative
+    sample SDs) floored at 5%, so a cell is only annotated when the difference is larger than
+    the spread the run itself recorded. `within` holds each row's per-process relative SDs.
+    """
+    fork = best.get(key, {}).get(row_names[0])
+    if not fork or len(fork) < 2:
+        return {}
+    out = {}
+    for engine in row_names[1:]:
+        other = best.get(key, {}).get(engine)
+        if not other or len(other) < 2:
+            out[engine] = None
+            continue
+        fork_median, other_median = statistics.median(fork), statistics.median(other)
+        if fork_median <= 0 or other_median <= 0:
+            out[engine] = None
+            continue
+        band = max(math.hypot(statistics.stdev(fork) / fork_median,
+                              statistics.stdev(other) / other_median), VERDICT_FLOOR)
+        ratio = fork_median / other_median
+        out[engine] = (ratio, band) if abs(math.log(ratio)) > band else False
+    return out
+
+
+def verdict_text(verdict, fork_us):
+    """`🔴 2.5x slower` / `🔵 2.5x faster` / `·` inside the band / `-` when not measurable."""
+    if verdict is None:
+        return '-'
+    if verdict is False:
+        return '·'
+    ratio, _ = verdict
+    mark = '🔴' if ratio > 1 else '🔵'
+    text = f'{mark} {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
+    if fork_us is not None and fork_us < DISPATCH_US:
+        text += ' (dispatch-dominated)'
+    return text
+
+
+def spread_guide_text(best, within):
+    """One line telling a reader what spread looks like in this run, plus how to read it."""
+    guide = spread_guide(best, within)
+    if guide["between_cells"] < 1:
+        return ("Spread guide: this run kept one process set per cell, so no between-start spread is "
+                "available; the within-process SD of each row is still in its `W` value.")
+    worst = (f", worst {guide['between_worst_signal']:.2%} among cells of 1 us or more "
+             f"(a sub-microsecond row is timer and scheduler jitter, not kernel time)"
+             if guide.get("between_worst_signal") is not None else "")
+    return (
+        f"Spread guide (computed from this run's own rows): per-engine between-start range median "
+        f"{guide['between_median']:.2%}{worst}; "
+        f"{guide['between_flagged']} of {guide['between_cells']} engine cells exceed 5% and carry `!`; "
+        f"median within-process relative SD {guide['within_median']:.2%}. A cell whose `±`, `!` or `p` "
+        f"is as large as the difference you are reading is not evidence of a regression."
+    )
+
+
 def render(manifest, suite, rows, run_dir):
     d = descriptor.current()
+    axes = report_axes(rows, manifest['timing_policy'])
     report = d.report
     vendor = manifest.get("vendor") or {}
     library = manifest["library"]
@@ -95,7 +262,11 @@ def render(manifest, suite, rows, run_dir):
     # prints the arms it has, and a vendor arm has one LAPACK row because one binary links one
     # vendor library.
     row_names = list(engines)
-    best, skipped = best_per_case(rows)
+    v2 = manifest['timing_policy']['version'] == 2
+    if v2:
+        from .timing_evidence import validate
+        validate(manifest, run_dir)
+    best, skipped, within, series = best_per_case(rows, manifest['timing_policy'])
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
@@ -113,6 +284,8 @@ def render(manifest, suite, rows, run_dir):
         f"- features: `{', '.join(library['features']) or 'default'}`",
         *([f"- {report['provider_label']}: " + "; ".join(provider_text(p) for p in deps)] if deps else []),
         f"- {report['harness_label']}: `{manifest['harness']['commit']}`",
+        *([f"- toolkit commit: `{manifest['toolkit']['commit']}`",
+           f"- measured binary SHA-256: `{manifest['binary']['sha256']}`"] if v2 else []),
         f"- hardware profile: `{manifest['target_profile']}`",
         f"- timestamp: `{manifest['timestamp']}`",
         f"- timing policy: v{manifest['timing_policy']['version']}, "
@@ -172,7 +345,30 @@ def render(manifest, suite, rows, run_dir):
                                    for t, c in sorted(manifest["threads"]["cpu_sets"].items(),
                                                       key=lambda kv: int(kv[0]))),
         "",
-        *d.verify_note().replace("{binary}", d.measured["binary"]).splitlines(),
+        *(d.verify_note().replace("{binary}", d.measured["binary"]).splitlines() if not v2 else [
+            'Every timed cell matches a successful verification census, including operation variants.',
+            'Each cell is median of process medians ± sample SD of those medians; W is the median',
+            'within-process sample SD. All values are milliseconds. These are descriptive spreads,',
+            'not confidence intervals. The between-process spread includes the rotating-order schedule.',
+            f"Each process retains {manifest['timing_policy']['repetitions']} chronological calls; "
+            f"{manifest['run_spec']['aa']} complete process sets are recorded.",
+            spread_guide_text(best, within),
+            f"The `vs {row_names[0]}` column is the rotation-averaged ratio exp(mean over starts of",
+            f"log(engine median / {row_names[0]} median)), with the per-start ratios beside it: `R > 1`",
+            'means the engine was slower than that first-declared row in that start. It removes a',
+            'row-position',
+            'effect only under one position effect shared by the engines and stable across starts,',
+            'and only where every declared engine has a measured row (`*` marks a cell where one has',
+            'no row, so no ratio there is position-balanced). `!` marks a cell where some engine\'s own',
+            'per-start median range exceeds 5% of its median, and `p` a balanced cell whose estimated',
+            'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
+            'between-start variation can exceed the difference being compared.',
+            'The per-engine columns at the right mark only differences larger than the spread this run',
+            'recorded for those two rows (combined between-start SD, floored at 5%): `🔴` the fork is',
+            'slower, `🔵` faster, `·` inside the band, `-` that row is not measured in this arm,',
+            'parentheses around a verdict when the cell itself carries a between-start warning. They',
+            'describe the recorded revisions; they are not a regression claim.',
+        ]),
         "",
     ]
     for population in manifest["run_spec"]["populations"]:
@@ -185,12 +381,12 @@ def render(manifest, suite, rows, run_dir):
         # axis still gets its tables split by what its rows actually carry, so two values of
         # an axis are never pooled into one table.
         axis_values_lists = [(manifest["run_spec"].get(axis) or sorted({row[axis] for row in rows}))
-                             for axis in d.case_axes]
+                             for axis in axes]
         for dtype in manifest["run_spec"]["dtypes"]:
             for axis_values in itertools.product(*axis_values_lists):
                 for threads in manifest["threads"]["counts"]:
                     section = ", ".join([regime, dtype]
-                                        + [f"{v} {a}" for v, a in zip(axis_values, d.case_axes)]
+                                        + [f"{v} {a}" for v, a in zip(axis_values, axes)]
                                         + [f"{threads}T"])
                     head = 3 + len(axis_values)
                     cases = sorted({k[1] for k in best
@@ -202,14 +398,38 @@ def render(manifest, suite, rows, run_dir):
                     out.append(f"## {section} "
                                f"(CPU {manifest['threads']['cpu_sets'].get(str(threads), '?')})")
                     out.append("")
-                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names) + " |")
-                    out.append("|" + "---|" * (len(row_names) + 1))
+                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names)
+                               + (f" | vs {row_names[0]} |" if v2 else " |")
+                               + ("" if not v2 else "".join(f" vs `{e}` |" for e in row_names[1:])))
+                    out.append("|" + "---|" * (len(row_names) + 1 + (1 if v2 else 0)
+                                               + (0 if not v2 else len(row_names) - 1)))
                     for case in cases:
                         cells = []
+                        key = (regime, case, dtype, *axis_values, threads)
                         for engine in row_names:
-                            key = (regime, case, dtype, *axis_values, threads)
                             times = best.get(key, {}).get(engine, [])
-                            cells.append(f"{min(times):.4f}" if times else "-")
+                            if times and v2:
+                                cells.append(f"{statistics.median(times):.6g} ± {statistics.stdev(times):.6g} "
+                                             f"(W {statistics.median(within[key][engine]):.6g})")
+                            else:
+                                cells.append(f"{min(times):.4f}" if times else "-")
+                        if v2:
+                            ratios, detail = rotation_ratios(series, key, row_names, row_names[0])
+                            balanced, between, position = cell_statistics(series, key, row_names)
+                            marks = ("* " if not balanced else "") \
+                                + ("! " if between > 0.05 else "") \
+                                + ("p " if position and position > 1.05 else "")
+                            parts = [f"`{engine}` {ratios[engine]:.4g} ({detail[engine]})"
+                                     if ratios.get(engine) is not None else f"`{engine}` -"
+                                     for engine in row_names[1:]]
+                            cells.append(marks + "; ".join(parts))
+                            forks = best.get(key, {}).get(row_names[0]) or []
+                            fork_us = statistics.median(forks) if forks else None
+                            verdicts = comparison_verdict(best, within, key, row_names)
+                            for engine in row_names[1:]:
+                                text = verdict_text(verdicts.get(engine), fork_us)
+                                flagged = between > 0.05 or bool(position and position > 1.05)
+                                cells.append(f"({text})" if flagged and text not in ('-', '·') else text)
                         out.append(f"| `{case}` | " + " | ".join(cells) + " |")
                     out.append("")
                     if not population.get("skipped") and threads in [t for (r, t) in skipped
@@ -224,7 +444,12 @@ def render(manifest, suite, rows, run_dir):
             out.append(f"Not applicable to this population's shapes and reported as skipped: "
                        f"{', '.join('`' + c + '`' for c in population['skipped'])}.")
             out.append("")
-    if manifest["run_spec"]["aa"] > 1:
+    if v2:
+        out.append('Repeated process sets describe observed repeatability under the recorded order '
+                   'schedule; they are not a paired baseline/candidate experiment and do not '
+                   'establish equal performance between engines.')
+        out.append('')
+    elif manifest["run_spec"]["aa"] > 1:
         spreads = []
         for key, per_row in best.items():
             for engine, times in per_row.items():

@@ -191,6 +191,25 @@
         }
       }
     },
+    "binary": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "toolkit": {
+      "type": "object",
+      "required": ["commit", "dirty", "measured_path"],
+      "additionalProperties": false,
+      "properties": {
+        "commit": {"type": "string", "minLength": 1},
+        "dirty": {"type": "boolean"},
+        "measured_path": {"type": "string", "minLength": 1}
+      }
+    },
     "harness": {
       "type": "object",
       "required": [
@@ -220,6 +239,13 @@
       ],
       "additionalProperties": false,
       "properties": {
+          "power": {"type": ["object", "null"],
+            "description": "Power/frequency controls in force while measuring, read from sysfs when the host exposes them.",
+            "additionalProperties": false,
+            "properties": {"cpufreq_boost": {"type": "string"}, "intel_no_turbo": {"type": "string"},
+                           "amd_pstate_status": {"type": "string"}, "platform_profile": {"type": "string"},
+                           "governor": {"type": "string"}, "energy_performance_preference": {"type": "string"},
+                           "scaling_max_freq_khz": {"type": "string"}}},
         "hostname": {
           "type": "string"
         },
@@ -314,7 +340,11 @@
       "additionalProperties": false,
       "properties": {
         "version": {
-          "const": 1
+          "enum": [1, 2]
+        },
+        "row_rotation_step": {
+          "type": "integer",
+          "minimum": 0
         },
         "minimum_untimed_priming_ms": {
           "type": "integer",
@@ -415,6 +445,12 @@
       "items": {
         "type": "string"
       }
+    },
+    "verification_files": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "uniqueItems": true
     },
     "result_files": {
       "type": "array",
