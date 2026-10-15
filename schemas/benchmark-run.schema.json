@@ -239,6 +239,13 @@
       ],
       "additionalProperties": false,
       "properties": {
+          "power": {"type": ["object", "null"],
+            "description": "Power/frequency controls in force while measuring, read from sysfs when the host exposes them.",
+            "additionalProperties": false,
+            "properties": {"cpufreq_boost": {"type": "string"}, "intel_no_turbo": {"type": "string"},
+                           "amd_pstate_status": {"type": "string"}, "platform_profile": {"type": "string"},
+                           "governor": {"type": "string"}, "energy_performance_preference": {"type": "string"},
+                           "scaling_max_freq_khz": {"type": "string"}}},
         "hostname": {
           "type": "string"
         },
