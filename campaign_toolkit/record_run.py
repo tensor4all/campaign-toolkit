@@ -135,14 +135,13 @@ def require_observer_off_measured_cpus(cpu_sets):
         sys.exit(f"ERROR: this recording process may run on measured CPUs {shared} "
                  f"(measured set with siblings: {sorted(measured)}); pin the observing side off the "
                  f"measured L3 domain, for example `taskset -c {free or '?'} python3 <recorder> ...`")
-    if not free_cpus and os.environ.get("FBENCH_OBSERVER_SHARES_L3") != "1":
-        sys.exit("ERROR: the measured CPUs cover every L3 domain on this host, so the observing side "
-                 "cannot be placed off the measured cache. Park the observing side for the "
-                 "measurement, or set FBENCH_OBSERVER_SHARES_L3=1 to record the residual sharing "
-                 "explicitly instead of leaving it implicit")
     if not free_cpus:
-        print("warning: FBENCH_OBSERVER_SHARES_L3=1 - the observing side shares an L3 domain with the "
-              "measurement; the residual contention is recorded, not removed", file=sys.stderr)
+        # A machine with a single L3 domain (a small CI runner, a laptop with one CCX) cannot
+        # separate the observer from the measurement. That is a fact about the host, not an
+        # operator error, so it is recorded as a warning instead of refused.
+        print("warning: no CPU lies outside the measured L3 domains on this host, so the observing "
+              "side shares them with the measurement; the residual contention is recorded here and "
+              "in the run's provenance, not removed", file=sys.stderr)
 
 
 def ranges(cpus):

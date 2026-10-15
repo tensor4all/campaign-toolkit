@@ -150,16 +150,16 @@ class FixtureCampaignTest(unittest.TestCase):
                 record_run.warn_if_measured_cpus_span_l3_domains({'8': '0-7'})
                 self.assertIn('spans the L3 domains', loud.getvalue())           # warned, not refused
 
-    def test_observer_sharing_every_domain_must_be_acknowledged(self):
+    def test_single_l3_domain_host_warns_instead_of_refusing(self):
+        # A small CI runner has one L3 domain: nothing can be parked off the measured cache there,
+        # so this is a recorded warning, while an observer that may land on a measured CPU still
+        # refuses.
         with (mock.patch.object(record_run, 'l3_domain', return_value={4, 5}),
               mock.patch.object(record_run, 'online_cpus', return_value={4, 5}),
-              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={99})):
-            with self.assertRaisesRegex(SystemExit, 'cover every L3 domain'):
-                record_run.require_observer_off_measured_cpus({'1': '4'})
-            with mock.patch.dict(os.environ, {'FBENCH_OBSERVER_SHARES_L3': '1'}), \
-                 mock.patch('sys.stderr', new_callable=io.StringIO) as loud:
-                record_run.require_observer_off_measured_cpus({'1': '4'})
-                self.assertIn('residual contention is recorded', loud.getvalue())
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={99}),
+              mock.patch('sys.stderr', new_callable=io.StringIO) as loud):
+            record_run.require_observer_off_measured_cpus({'1': '4'})
+            self.assertIn('shares them with the measurement', loud.getvalue())
 
     def test_boost_on_is_refused_and_can_be_recorded(self):
         record_run.require_boost_disabled({'cpufreq_boost': '0'})              # disabled: no exit
