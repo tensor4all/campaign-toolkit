@@ -92,7 +92,8 @@ def control_check(baseline_run, candidate_run, engine, cells=None):
     candidate_series = series(candidate_run, engine, candidate['timing_policy']['repetitions'])
     keys = sorted(set(baseline_series) & set(candidate_series))
     if cells:
-        keys = [key for key in keys if any(cell in '/'.join(str(part) for part in key) for cell in cells)]
+        keys = [key for key in keys
+                if any(cell.strip() in part for cell in cells for part in map(str, key))]
     rows, ok = [], True
     for key in keys:
         base = baseline_series[key]
@@ -116,7 +117,7 @@ def fork_comparison(baseline_run, candidate_run, fork_engine, cells=None):
     candidate_series = series(candidate_run, fork_engine, candidate['timing_policy']['repetitions'])
     rows = []
     for key in sorted(set(baseline_series) & set(candidate_series)):
-        if cells and not any(cell in '/'.join(str(part) for part in key) for cell in cells):
+        if cells and not any(cell.strip() in part for cell in cells for part in map(str, key)):
             continue
         base, cand = baseline_series[key], candidate_series[key]
         shared = sorted(set(base) & set(cand))
