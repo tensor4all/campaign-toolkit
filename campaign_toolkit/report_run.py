@@ -152,7 +152,7 @@ def spread_guide(best, within):
     and the between-start range includes the rotating-order schedule, so this is a reading aid that
     lets a reader tell "this cell moved" from "this cell is noisy" without a model.
     """
-    within_rel, between_rel = [], []
+    within_rel, between_rel, signal_rel = [], [], []
     for key, per_engine in best.items():
         for engine, medians in per_engine.items():
             center = statistics.median(medians) if medians else 0.0
@@ -161,10 +161,13 @@ def spread_guide(best, within):
                 within_rel += [sd / m for sd, m in zip(sds, medians) if m > 0]
                 if len(medians) > 1:
                     between_rel.append((max(medians) - min(medians)) / center)
+                    if center >= 1e-3:      # >= 1 us: below that a row is timer/scheduler jitter
+                        signal_rel.append((max(medians) - min(medians)) / center)
     return {
         "within_median": statistics.median(within_rel) if within_rel else None,
         "between_median": statistics.median(between_rel) if between_rel else None,
         "between_worst": max(between_rel) if between_rel else None,
+        "between_worst_signal": max(signal_rel) if signal_rel else None,
         "between_flagged": sum(1 for r in between_rel if r > 0.05),
         "between_cells": len(between_rel),
     }
@@ -188,9 +191,12 @@ def spread_guide_text(best, within):
     if guide["between_cells"] < 1:
         return ("Spread guide: this run kept one process set per cell, so no between-start spread is "
                 "available; the within-process SD of each row is still in its `W` value.")
+    worst = (f", worst {guide['between_worst_signal']:.2%} among cells of 1 us or more "
+             f"(a sub-microsecond row is timer and scheduler jitter, not kernel time)"
+             if guide.get("between_worst_signal") is not None else "")
     return (
         f"Spread guide (computed from this run's own rows): per-engine between-start range median "
-        f"{guide['between_median']:.2%}, worst {guide['between_worst']:.2%}, and "
+        f"{guide['between_median']:.2%}{worst}; "
         f"{guide['between_flagged']} of {guide['between_cells']} engine cells exceed 5% and carry `!`; "
         f"median within-process relative SD {guide['within_median']:.2%}. A cell whose `±`, `!` or `p` "
         f"is as large as the difference you are reading is not evidence of a regression."
