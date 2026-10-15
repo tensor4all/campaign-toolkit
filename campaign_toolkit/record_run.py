@@ -155,6 +155,42 @@ def ranges(cpus):
     return out
 
 
+def boost_state():
+    """The boost/turbo switches this host exposes, read as `{name: raw value}`."""
+    state = {}
+    for name, path in (("cpufreq_boost", "/sys/devices/system/cpu/cpufreq/boost"),
+                       ("intel_pstate_no_turbo", "/sys/devices/system/cpu/intel_pstate/no_turbo")):
+        node = pathlib.Path(path)
+        try:
+            if node.exists():
+                state[name] = node.read_text().strip()
+        except OSError:
+            pass
+    return state
+
+
+def require_boost_disabled(state=None):
+    """Refuse to measure while a boost switch is on: frequency is part of the measurement.
+
+    A boost that is on for one process start and throttled for the next moves the level between
+    starts. On this campaign's host the process-median range of `cholesky` 512^2 f64 8T collapsed
+    from 40-73% to 1.5-5% once boost was disabled, so a run with boost on is not comparable with a
+    run without it. `FBENCH_ALLOW_BOOST=1` records the deviation instead of refusing, for hosts
+    where the switch cannot be changed.
+    """
+    state = boost_state() if state is None else state
+    on = [f"{name}={value}" for name, value in sorted(state.items())
+          if (name == "cpufreq_boost" and value == "1") or (name == "intel_pstate_no_turbo" and value == "0")]
+    if not on:
+        return
+    if os.environ.get("FBENCH_ALLOW_BOOST") != "1":
+        sys.exit("ERROR: CPU boost/turbo is enabled (" + ", ".join(on) + "); disable it before "
+                 "measuring, for example `echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost`, "
+                 "or set FBENCH_ALLOW_BOOST=1 to record the deviation explicitly")
+    print(f"warning: FBENCH_ALLOW_BOOST=1 - boost is on ({', '.join(on)}); the frequency level is "
+          f"not fixed, and these numbers are not comparable with boost-off runs", file=sys.stderr)
+
+
 def toolkit_identity(root):
     """V2 needs this package's own Git checkout, not an enclosing campaign repo."""
     root = pathlib.Path(root).resolve()
@@ -445,6 +481,7 @@ def main(argv=None, root=None):
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
     warn_if_measured_cpus_span_l3_domains(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)
+    require_boost_disabled()
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')
     toolkit = None

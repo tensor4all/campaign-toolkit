@@ -161,6 +161,18 @@ class FixtureCampaignTest(unittest.TestCase):
                 record_run.require_observer_off_measured_cpus({'1': '4'})
                 self.assertIn('residual contention is recorded', loud.getvalue())
 
+    def test_boost_on_is_refused_and_can_be_recorded(self):
+        record_run.require_boost_disabled({'cpufreq_boost': '0'})              # disabled: no exit
+        record_run.require_boost_disabled({})                                  # not exposed: no exit
+        with self.assertRaisesRegex(SystemExit, 'boost/turbo is enabled'):
+            record_run.require_boost_disabled({'cpufreq_boost': '1'})
+        with self.assertRaisesRegex(SystemExit, 'boost/turbo is enabled'):
+            record_run.require_boost_disabled({'intel_pstate_no_turbo': '0'})
+        with mock.patch.dict(os.environ, {'FBENCH_ALLOW_BOOST': '1'}), \
+             mock.patch('sys.stderr', new_callable=io.StringIO) as loud:
+            record_run.require_boost_disabled({'cpufreq_boost': '1'})
+            self.assertIn('frequency level is not fixed', loud.getvalue())
+
     def test_descriptor_path_can_be_named(self):
         alt = self.root / "alt-campaign.yaml"
         shutil.copy(self.root / "benchmarks/campaign.yaml", alt)
