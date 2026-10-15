@@ -118,6 +118,7 @@ class FixtureCampaignTest(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
 
             with (mock.patch.object(record_run, 'build', return_value=pin),
+                  mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
                   mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
                                     original['library']['commit'] if args[0] == 'rev-parse' else ''),
                   mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
@@ -130,6 +131,13 @@ class FixtureCampaignTest(unittest.TestCase):
             self.assertEqual(code, 0 if no_publish else 37)
             self.assertEqual('gen_index' in modules, not no_publish)
             self.assertEqual('publish_report' in modules, not no_publish)
+
+    def test_observer_affinity_must_miss_the_measured_cpus(self):
+        with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={0, 1, 2, 3}):
+            record_run.require_observer_off_measured_cpus({'1': '4'})   # disjoint: no exit
+        with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={0, 7}):
+            with self.assertRaisesRegex(SystemExit, 'may run on measured CPUs'):
+                record_run.require_observer_off_measured_cpus({'1': '4-11'})
 
     def test_descriptor_path_can_be_named(self):
         alt = self.root / "alt-campaign.yaml"

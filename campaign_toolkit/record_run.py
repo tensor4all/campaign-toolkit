@@ -53,6 +53,46 @@ def git(dir_, *args):
                           text=True, capture_output=True).stdout.strip()
 
 
+def parse_cpu_list(text):
+    cpus = set()
+    for part in str(text).split(","):
+        if not part:
+            continue
+        if "-" in part:
+            low, high = part.split("-")
+            cpus.update(range(int(low), int(high) + 1))
+        else:
+            cpus.add(int(part))
+    return cpus
+
+
+def measured_cpus(cpu_sets):
+    """The measured CPUs plus their SMT siblings: a busy sibling contends for the core."""
+    measured = set()
+    for spec in cpu_sets.values():
+        for cpu in parse_cpu_list(spec):
+            topology = pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list")
+            measured.update(parse_cpu_list(topology.read_text()) if topology.exists() else {cpu})
+    return measured
+
+
+def require_observer_off_measured_cpus(cpu_sets):
+    """Refuse to record from a process that may be scheduled onto a measured CPU.
+
+    Keeping unrelated work off the measured cores is an operator precondition, not something the
+    idle guard can repair after the fact: this process is the observer, and its children inherit
+    its affinity, so an unpinned recorder can land on the very cores it measures. Fail before the
+    build rather than record a number nobody can trust.
+    """
+    measured = measured_cpus(cpu_sets)
+    mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
+    shared = sorted(mine & measured)
+    if shared:
+        sys.exit(f"ERROR: this recording process may run on measured CPUs {shared} "
+                 f"(measured set with siblings: {sorted(measured)}); pin the observing side off the "
+                 f"measured L3 domain, for example `taskset -c 0-3 python3 <recorder> ...`")
+
+
 def toolkit_identity(root):
     """V2 needs this package's own Git checkout, not an enclosing campaign repo."""
     root = pathlib.Path(root).resolve()
@@ -325,6 +365,7 @@ def main(argv=None, root=None):
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
+    require_observer_off_measured_cpus(cpu_sets)
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')
     toolkit = None
