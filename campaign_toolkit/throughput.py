@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 PANEL_W, PANEL_H = 620, 480
-PAD_L, PAD_R, PAD_T, PAD_B = 132, 24, 56, 44
+PAD_L, PAD_R, PAD_T, PAD_B = 168, 24, 56, 44
 FONT = {'title': 26, 'panel': 24, 'tick': 17, 'axis': 19, 'legend': 16}
 
 
@@ -28,23 +28,39 @@ FONT = {'title': 26, 'panel': 24, 'tick': 17, 'axis': 19, 'legend': 16}
 class Layout:
     """Text bounding boxes, so a layout bug is an assertion rather than a surprise on the page."""
     boxes: list = field(default_factory=list)
+    dropped: list = field(default_factory=list)
+
+    def tick(self, x, y, size, content, anchor='start', panel=None):
+        """A tick label, dropped when it would collide: a crowded axis is unreadable, and the
+        gridline stays. Returns the label or an empty string."""
+        try:
+            return self.text(x, y, size, content, anchor, panel=panel)
+        except ValueError:
+            self.dropped.append(content)
+            return ''
 
     def text(self, x, y, size, content, anchor='start', rotate=False, panel=None):
         width = 0.62 * size * len(content)
-        if rotate:
-            x0, x1 = x - size * 0.8, x
+        if rotate:                      # the text runs along the vertical axis
+            x0, x1 = x - size * 0.25, x + size * 0.9
+            width = size
         elif anchor == 'middle':
             x0, x1 = x - width / 2, x + width / 2
         elif anchor == 'end':
             x0, x1 = x - width, x
         else:
             x0, x1 = x, x + width
-        box = (x0, y - size * 0.9, x1, y + size * 0.25, panel)
+        if rotate:
+            half = 0.62 * size * len(content) / 2
+            box = (x0, y - half, x1, y + half, panel, content)
+        else:
+            box = (*((x0, y - size * 0.9, x1, y + size * 0.25)), panel, content)
         for other in self.boxes:
             if other[4] is not panel:
                 continue
-            if box[0] < other[2] and other[0] < box[2] and box[1] < other[3] and box[1] < box[3]:
-                raise ValueError(f'overlapping text: {content!r} collides with a neighbour')
+            if box[0] < other[2] and other[0] < box[2] and box[1] < other[3] and other[1] < box[3]:
+                raise ValueError(f'overlapping text: {content!r} {[round(v, 1) for v in box[:4]]} '
+                                 f'with {other[5]!r} {[round(v, 1) for v in other[:4]]}')
         if panel:
             px, py = panel
             if (box[0] < px - 1 or box[2] > px + PANEL_W + 1
@@ -104,8 +120,8 @@ def marker(kind, x, y, colour, size):
 
 def render_panel(layout, family, threads, blocks, coefficient, origin, series):
     ox, oy = origin
-    x0, y0 = ox + 92, oy + 32
-    width, height = PANEL_W - 116, PANEL_H - 100
+    x0, y0 = ox + 150, oy + 32
+    width, height = PANEL_W - 174, PANEL_H - 100
     data = [p for pts in blocks.values() for p in pts]
     panel_key = (ox, oy)
     if not data:
@@ -121,15 +137,16 @@ def render_panel(layout, family, threads, blocks, coefficient, origin, series):
     for size in sorted(set(xs)):
         out.append(f'<line x1="{scale_x(size):.1f}" y1="{y0}" x2="{scale_x(size):.1f}" y2="{y0 + height}" '
                    f'stroke="#f2f2f2"/>')
-        out.append(layout.text(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
-                                panel=panel_key))
+        out.append(layout.tick(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
+                               panel=panel_key))
     for power in range(math.ceil(ly0), math.floor(ly1) + 1):
         value = 10.0 ** power
         out.append(f'<line x1="{x0}" y1="{scale_y(value):.1f}" x2="{x0 + width}" y2="{scale_y(value):.1f}" '
                    f'stroke="#f2f2f2"/>')
-        out.append(layout.text(x0 - 8, scale_y(value) + 6, FONT['tick'], f'{value:g}', 'end', panel=panel_key))
+        out.append(layout.tick(x0 - 10, scale_y(value) + 6, FONT['tick'], f'{value:g}', 'end',
+                               panel=panel_key))
     out.append(f'<rect x="{x0}" y="{y0}" width="{width}" height="{height}" fill="none" stroke="#c8c8c8"/>')
-    out.append(layout.text(ox + 28, oy + PANEL_H - 14, FONT['axis'], 'n (matrix size)', 'start', panel=panel_key))
+    out.append(layout.text(ox + 150, oy + PANEL_H - 14, FONT['axis'], 'n (matrix size)', 'start', panel=panel_key))
     out.append(layout.text(ox + 30, oy + PANEL_H / 2, FONT['axis'], 'nominal GFLOP/s', 'middle', rotate=True,
                            panel=panel_key))
     for spec in series:
@@ -163,6 +180,7 @@ def render_panel(layout, family, threads, blocks, coefficient, origin, series):
 
 
 def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64'):
+    """Returns (svg, dropped_tick_labels) so a caller can report a crowded axis."""
     """One SVG: a panel per thread budget, stacked so a page does not have to scale the text down."""
     layout = Layout()
     width = PAD_L + PANEL_W + PAD_R
@@ -176,7 +194,7 @@ def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64
         svg.append(render_panel(layout, family, threads, blocks, family_spec['coefficient'],
                                 (PAD_L, PAD_T + index * PANEL_H), series))
     svg.append('</svg>')
-    return '\n'.join(svg) + '\n'
+    return '\n'.join(svg) + '\n', layout.dropped
 
 
 def data_markdown(family, family_spec, series, cells_by_run, budgets, dtype='f64'):
@@ -203,17 +221,39 @@ def data_markdown(family, family_spec, series, cells_by_run, budgets, dtype='f64
     return '\n'.join(lines) + '\n'
 
 
+def page_markdown(config, families, budgets, dtype='f64'):
+    """The page that links the charts: a table of contents, then one section per family."""
+    page = config.get('page', {})
+    version = config.get('version', 'v1')
+    lines = [f'# {page.get("title", "Throughput charts")}', '']
+    lines += [line for line in page.get('notes', [])]
+    lines += ['', '## Contents', '',
+              '| family (chart, data) | nominal flops |', '|---|---|']
+    for family in families:
+        spec = config['families'][family]
+        lines.append(f'| [{family}](throughput-{family}-{version}.svg) '
+                     f'([data](throughput-{family}-{version}.md)) | `{spec["label"]}` |')
+    lines.append('')
+    for family in families:
+        lines += [f'## {family}', '', f'![{family}](throughput-{family}-{version}.svg)', '',
+                  f'Plotted numbers: [throughput-{family}-{version}.md](throughput-{family}-{version}.md). '
+                  f'Nominal operation count `{config["families"][family]["label"]}`.', '']
+    return '\n'.join(lines) + '\n'
+
+
 def write_report(run_dirs, config, out_dir, budgets=(1, 4, 8), dtype='f64', order='c'):
     """Write `throughput-<family>-<version>.svg` and `.md` for every family in the config."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     cells_by_run = [load_run(run_dir, dtype=dtype, order=order) for run_dir in run_dirs]
-    written = []
+    written, dropped = [], []
     for family, family_spec in config['families'].items():
-        svg = render_family(family, family_spec, config['series'], cells_by_run, budgets, dtype)
+        svg, skipped = render_family(family, family_spec, config['series'], cells_by_run, budgets, dtype)
+        dropped += [f'{family}:{label}' for label in skipped]
         version = config.get('version', 'v1')
         (out_dir / f'throughput-{family}-{version}.svg').write_text(svg)
         (out_dir / f'throughput-{family}-{version}.md').write_text(
             data_markdown(family, family_spec, config['series'], cells_by_run, budgets, dtype))
         written.append(family)
-    return written
+    (out_dir / 'README.md').write_text(page_markdown(config, written, budgets, dtype))
+    return written, dropped

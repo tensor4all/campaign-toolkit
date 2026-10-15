@@ -4,6 +4,11 @@ from campaign_toolkit import throughput
 
 
 class LayoutTest(unittest.TestCase):
+    def test_text_on_different_rows_is_not_an_overlap(self):
+        layout = throughput.Layout()
+        layout.text(10, 20, 20, 'aaaa', panel=(0, 0))
+        layout.text(10, 120, 20, 'bbbb', panel=(0, 0))     # same column, far below: fine
+
     def test_overlapping_text_is_refused(self):
         layout = throughput.Layout()
         layout.text(10, 20, 20, 'aaaa', panel=(0, 0))
