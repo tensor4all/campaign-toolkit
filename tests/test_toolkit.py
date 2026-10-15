@@ -139,6 +139,14 @@ class FixtureCampaignTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'may run on measured CPUs'):
                 record_run.require_observer_off_measured_cpus({'1': '4-11'})
 
+    def test_measured_threads_must_share_one_l3_domain(self):
+        with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
+            record_run.require_measured_cpus_share_one_l3({'4': '4-7'})   # one domain: no exit
+        with mock.patch.object(record_run, 'l3_domain',
+                               side_effect=lambda cpu: {0, 1} if cpu < 4 else {4, 5}):
+            with self.assertRaisesRegex(SystemExit, 'must share one L3'):
+                record_run.require_measured_cpus_share_one_l3({'8': '0-7'})
+
     def test_descriptor_path_can_be_named(self):
         alt = self.root / "alt-campaign.yaml"
         shutil.copy(self.root / "benchmarks/campaign.yaml", alt)

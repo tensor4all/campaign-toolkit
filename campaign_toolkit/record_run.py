@@ -66,14 +66,46 @@ def parse_cpu_list(text):
     return cpus
 
 
+def sysfs_cpu_list(path):
+    return parse_cpu_list(path.read_text()) if path.exists() else set()
+
+
+def l3_domain(cpu):
+    """The CPUs sharing `cpu`'s last-level cache, `cpu` included."""
+    return sysfs_cpu_list(pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/cache/index3/shared_cpu_list")) or {cpu}
+
+
+def online_cpus():
+    return sysfs_cpu_list(pathlib.Path("/sys/devices/system/cpu/online")) or set(os.sched_getaffinity(0))
+
+
 def measured_cpus(cpu_sets):
-    """The measured CPUs plus their SMT siblings: a busy sibling contends for the core."""
+    """The declared measured CPUs plus their SMT siblings: a busy sibling contends for the core."""
     measured = set()
     for spec in cpu_sets.values():
         for cpu in parse_cpu_list(spec):
-            topology = pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list")
-            measured.update(parse_cpu_list(topology.read_text()) if topology.exists() else {cpu})
+            measured |= sysfs_cpu_list(pathlib.Path(
+                f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list")) or {cpu}
     return measured
+
+
+def observer_cpus(cpu_sets):
+    """CPUs outside every L3 domain a measured CPU belongs to: where the observing side belongs."""
+    domains = set()
+    for spec in cpu_sets.values():
+        for cpu in parse_cpu_list(spec):
+            domains |= l3_domain(cpu)
+    return online_cpus() - domains
+
+
+def require_measured_cpus_share_one_l3(cpu_sets):
+    """A cell's threads must sit in one L3 domain, so the same cache serves every measured core."""
+    for threads, spec in cpu_sets.items():
+        domains = {frozenset(l3_domain(cpu)) for cpu in parse_cpu_list(spec)}
+        if len(domains) > 1:
+            sys.exit(f"ERROR: the {threads}T CPU set {spec!r} spans the L3 domains "
+                     f"{sorted(sorted(d) for d in domains)}; a measured thread set must share one L3, "
+                     f"otherwise its cores do not see the same cache")
 
 
 def require_observer_off_measured_cpus(cpu_sets):
@@ -82,15 +114,28 @@ def require_observer_off_measured_cpus(cpu_sets):
     Keeping unrelated work off the measured cores is an operator precondition, not something the
     idle guard can repair after the fact: this process is the observer, and its children inherit
     its affinity, so an unpinned recorder can land on the very cores it measures. Fail before the
-    build rather than record a number nobody can trust.
+    build rather than record a number nobody can trust. The suggested pin is derived from this
+    machine's topology, not from a hardcoded CPU list.
     """
     measured = measured_cpus(cpu_sets)
     mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
     shared = sorted(mine & measured)
     if shared:
+        free = ", ".join(f"{low}" if high == low else f"{low}-{high}"
+                         for low, high in ranges(sorted(observer_cpus(cpu_sets))))
         sys.exit(f"ERROR: this recording process may run on measured CPUs {shared} "
                  f"(measured set with siblings: {sorted(measured)}); pin the observing side off the "
-                 f"measured L3 domain, for example `taskset -c 0-3 python3 <recorder> ...`")
+                 f"measured L3 domain, for example `taskset -c {free or '?'} python3 <recorder> ...`")
+
+
+def ranges(cpus):
+    out = []
+    for cpu in cpus:
+        if out and cpu == out[-1][1] + 1:
+            out[-1][1] = cpu
+        else:
+            out.append([cpu, cpu])
+    return out
 
 
 def toolkit_identity(root):
@@ -365,6 +410,7 @@ def main(argv=None, root=None):
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
+    require_measured_cpus_share_one_l3(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')
