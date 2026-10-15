@@ -217,16 +217,19 @@ def comparison_verdict(best, within, key, row_names):
 
 
 def verdict_text(verdict, fork_us):
-    """`🔴 2.5x slower` / `🔵 2.5x faster` / `·` inside the band / `-` when not measurable."""
+    """`🔵 fork 2.5x faster` / `🔴 fork 2.5x slower` / `·` inside the band / `-` not measurable.
+
+    The subject is always the fork: blue means the fork is faster than that row, red means it is
+    slower, so a reader comparing the columns does not have to remember which row the cell belongs
+    to.
+    """
     if verdict is None:
         return '-'
     if verdict is False:
         return '·'
     ratio, _ = verdict
     mark = '🔴' if ratio > 1 else '🔵'
-    text = f'{mark} {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
-    if fork_us is not None and fork_us < DISPATCH_US:
-        text += ' (dispatch-dominated)'
+    text = f'{mark} fork {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
     return text
 
 
@@ -363,11 +366,14 @@ def render(manifest, suite, rows, run_dir):
             'per-start median range exceeds 5% of its median, and `p` a balanced cell whose estimated',
             'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
             'between-start variation can exceed the difference being compared.',
-            'The per-engine columns at the right mark only differences larger than the spread this run',
-            'recorded for those two rows (combined between-start SD, floored at 5%): `🔴` the fork is',
-            'slower, `🔵` faster, `·` inside the band, `-` that row is not measured in this arm,',
-            'parentheses around a verdict when the cell itself carries a between-start warning. They',
-            'describe the recorded revisions; they are not a regression claim.',
+            'The `vs` columns mark only differences larger than the spread this run recorded for those',
+            'two rows (combined between-start SD, floored at 5%), always with the fork as the subject:',
+            '`🔵 fork X faster` / `🔴 fork X slower`, `·` inside the band, `-` that row is not measured in',
+            'this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
+            '`!` between-start range over 5%, `p` position effect over 5%, dispatch-dominated means the',
+            'row is under 20 us so 4T/8T pay thread-region start-up). Per-start ratios and every',
+            'chronological sample are in the run directory named at the top of this page (`run*.csv`).',
+            'These describe the recorded revisions; they are not a regression claim.',
         ]),
         "",
     ]
@@ -398,11 +404,13 @@ def render(manifest, suite, rows, run_dir):
                     out.append(f"## {section} "
                                f"(CPU {manifest['threads']['cpu_sets'].get(str(threads), '?')})")
                     out.append("")
-                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names)
-                               + (f" | vs {row_names[0]} |" if v2 else " |")
-                               + ("" if not v2 else "".join(f" vs `{e}` |" for e in row_names[1:])))
-                    out.append("|" + "---|" * (len(row_names) + 1 + (1 if v2 else 0)
-                                               + (0 if not v2 else len(row_names) - 1)))
+                    # v2 drops the raw ratio column - the per-start ratios and every chronological
+                    # sample are in the run's own CSVs - and keeps one verdict column per other row
+                    # plus a separate notes column for the cell's warnings.
+                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names) + " |"
+                               + ("" if not v2 else "".join(f" vs `{e}` |" for e in row_names[1:]))
+                               + (" notes |" if v2 else " |"))
+                    out.append("|" + "---|" * (len(row_names) + (2 if not v2 else 2 + len(row_names) - 1)))
                     for case in cases:
                         cells = []
                         key = (regime, case, dtype, *axis_values, threads)
@@ -414,22 +422,22 @@ def render(manifest, suite, rows, run_dir):
                             else:
                                 cells.append(f"{min(times):.4f}" if times else "-")
                         if v2:
-                            ratios, detail = rotation_ratios(series, key, row_names, row_names[0])
                             balanced, between, position = cell_statistics(series, key, row_names)
-                            marks = ("* " if not balanced else "") \
-                                + ("! " if between > 0.05 else "") \
-                                + ("p " if position and position > 1.05 else "")
-                            parts = [f"`{engine}` {ratios[engine]:.4g} ({detail[engine]})"
-                                     if ratios.get(engine) is not None else f"`{engine}` -"
-                                     for engine in row_names[1:]]
-                            cells.append(marks + "; ".join(parts))
                             forks = best.get(key, {}).get(row_names[0]) or []
                             fork_us = statistics.median(forks) if forks else None
                             verdicts = comparison_verdict(best, within, key, row_names)
                             for engine in row_names[1:]:
-                                text = verdict_text(verdicts.get(engine), fork_us)
-                                flagged = between > 0.05 or bool(position and position > 1.05)
-                                cells.append(f"({text})" if flagged and text not in ('-', '·') else text)
+                                cells.append(verdict_text(verdicts.get(engine), fork_us))
+                            notes = []
+                            if not balanced:
+                                notes.append('`*` one row has no measurement here')
+                            if between > 0.05:
+                                notes.append('`!` between-start range over 5%')
+                            if position and position > 1.05:
+                                notes.append('`p` position effect over 5%')
+                            if fork_us is not None and fork_us < DISPATCH_US:
+                                notes.append('dispatch-dominated (row under 20 us)')
+                            cells.append('; '.join(notes) if notes else '')
                         out.append(f"| `{case}` | " + " | ".join(cells) + " |")
                     out.append("")
                     if not population.get("skipped") and threads in [t for (r, t) in skipped
