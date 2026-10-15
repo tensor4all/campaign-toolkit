@@ -145,6 +145,31 @@ def cell_statistics(series, key, engines):
     return balanced, between, position
 
 
+def spread_guide(best, within):
+    """Run-level noise guide computed from the run's own rows: what counts as spread here.
+
+    `within` is a descriptive spread read off the chronological calls, not a confidence interval,
+    and the between-start range includes the rotating-order schedule, so this is a reading aid that
+    lets a reader tell "this cell moved" from "this cell is noisy" without a model.
+    """
+    within_rel, between_rel = [], []
+    for key, per_engine in best.items():
+        for engine, medians in per_engine.items():
+            center = statistics.median(medians) if medians else 0.0
+            if center > 0:
+                sds = within.get(key, {}).get(engine, [])
+                within_rel += [sd / m for sd, m in zip(sds, medians) if m > 0]
+                if len(medians) > 1:
+                    between_rel.append((max(medians) - min(medians)) / center)
+    return {
+        "within_median": statistics.median(within_rel) if within_rel else None,
+        "between_median": statistics.median(between_rel) if between_rel else None,
+        "between_worst": max(between_rel) if between_rel else None,
+        "between_flagged": sum(1 for r in between_rel if r > 0.05),
+        "between_cells": len(between_rel),
+    }
+
+
 def provider_text(prov):
     """One provider's identity as a report fragment."""
     text = f"`{prov['name']}`"
@@ -155,6 +180,21 @@ def provider_text(prov):
     if prov.get("note"):
         text += f" ({prov['note']})"
     return text
+
+
+def spread_guide_text(best, within):
+    """One line telling a reader what spread looks like in this run, plus how to read it."""
+    guide = spread_guide(best, within)
+    if guide["between_cells"] < 1:
+        return ("Spread guide: this run kept one process set per cell, so no between-start spread is "
+                "available; the within-process SD of each row is still in its `W` value.")
+    return (
+        f"Spread guide (computed from this run's own rows): per-engine between-start range median "
+        f"{guide['between_median']:.2%}, worst {guide['between_worst']:.2%}, and "
+        f"{guide['between_flagged']} of {guide['between_cells']} engine cells exceed 5% and carry `!`; "
+        f"median within-process relative SD {guide['within_median']:.2%}. A cell whose `±`, `!` or `p` "
+        f"is as large as the difference you are reading is not evidence of a regression."
+    )
 
 
 def render(manifest, suite, rows, run_dir):
@@ -261,6 +301,7 @@ def render(manifest, suite, rows, run_dir):
             'not confidence intervals. The between-process spread includes the rotating-order schedule.',
             f"Each process retains {manifest['timing_policy']['repetitions']} chronological calls; "
             f"{manifest['run_spec']['aa']} complete process sets are recorded.",
+            spread_guide_text(best, within),
             f"The `vs {row_names[0]}` column is the rotation-averaged ratio exp(mean over starts of",
             f"log(engine median / {row_names[0]} median)), with the per-start ratios beside it: `R > 1`",
             'means the engine was slower than that first-declared row in that start. It removes a',
