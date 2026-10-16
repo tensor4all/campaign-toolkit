@@ -1,4 +1,4 @@
-"""Candidate mode: compare a candidate-revision run run against a recorded baseline run.
+"""Candidate mode: compare a candidate-revision run against a recorded baseline run.
 
 The procedure is fixed in the campaign's protocol document; this module implements it without knowing
 which campaign it serves:
@@ -9,8 +9,8 @@ which campaign it serves:
 2. a predeclared overlap set of cells is checked in-run: the candidate binary still carries the
    unchanged upstream row, so if that row no longer reproduces the baseline within the spread the
    baseline recorded, the machine is not in the baseline state and the comparison is refused;
-3. only then is the measured row compared, cell by cell, as the rotation-averaged ratio of the candidate
-   fork to the recorded baseline fork.
+3. only then is the measured row compared, cell by cell, as the rotation-averaged ratio of the
+   candidate row to the recorded baseline row.
 
 Everything here is descriptive: a ratio with the recorded spread beside it, no confidence interval,
 no equality claim, and a cell that was not measured in both runs is reported as missing.
@@ -59,6 +59,37 @@ def identity_differences(baseline, candidate):
     if baseline['run_spec'].get('aa') != candidate['run_spec'].get('aa'):
         out.append('complete-set count differs')
     return out
+
+
+def same_measured_code(checkout, measured_commit, merged_commit, paths, git=None):
+    """The measured paths whose tree hashes differ between two revisions ([] means identical code).
+
+    Measuring a candidate and then measuring it again after merging it into the fork's main branch is
+    wasted machine time when the merge did not touch the code; this is the check that says whether it
+    did, by comparing the recorded commit's tree hashes with the merged commit's for every measured
+    path. A merge that leaves them equal keeps the original measurement valid; a merge that changes one
+    invalidates only the cells that depend on it.
+    """
+    if git is None:
+        import subprocess
+
+        def git(path, *args):
+            return subprocess.run(['git', '-C', str(path), *args], check=True, capture_output=True,
+                                  text=True).stdout.strip()
+
+    differences = []
+    for path in paths:
+        try:
+            before = git(checkout, 'rev-parse', f'{measured_commit}:{path}' if path != 'Cargo.lock'
+                         else f'{measured_commit}:{path}')
+            after = git(checkout, 'rev-parse', f'{merged_commit}:{path}' if path != 'Cargo.lock'
+                        else f'{merged_commit}:{path}')
+        except Exception:                                   # noqa: BLE001 - a missing path is a difference
+            differences.append(f'{path}: not present in both revisions')
+            continue
+        if before != after:
+            differences.append(f'{path}: {before[:12]} vs {after[:12]}')
+    return differences
 
 
 def series(run_dir, engine, repetitions):
