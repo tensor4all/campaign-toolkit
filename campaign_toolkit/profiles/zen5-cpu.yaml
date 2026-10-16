@@ -4,6 +4,9 @@
 # `benchmarks/profiles.yaml` names the ones it measures. Adding a profile is a
 # deliberate act: an unknown profile in a run manifest is a schema error, not a
 # warning.
+# The development host: its pages are provisional and are superseded by the measurement host's
+# dataset once that machine exists.
+role: development
 name: zen5-cpu
 description: >-
   AMD Ryzen AI 9 HX 470 (Zen5 mobile APU), 12 physical / 24 logical cores.

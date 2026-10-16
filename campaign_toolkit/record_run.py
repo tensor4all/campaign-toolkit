@@ -257,6 +257,9 @@ def host_info(profile_name, profiles):
             pass
     return {
         "power": power or None,
+        # A page recorded on a development host is provisional; the same suite on a dedicated
+        # measurement host produces the published dataset. The profile states which it is.
+        "role": profile.get("role", "development"),
         "hostname": platform.node(),
         "cpu": profile["cpu"],
         "os": f"{platform.system()} {platform.release()}",

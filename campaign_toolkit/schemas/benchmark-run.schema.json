@@ -280,6 +280,10 @@
             "null"
           ]
         },
+        "role": {
+          "type": "string",
+          "description": "development or measurement: a development host's pages are provisional and are superseded by the measurement host's dataset."
+        },
         "l3_domains": {
           "type": [
             "string",
