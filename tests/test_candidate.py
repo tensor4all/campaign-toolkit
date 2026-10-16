@@ -72,9 +72,32 @@ class CandidateTest(unittest.TestCase):
         faster = make_run(self.root, 'faster', library='candidate', fork_ms=5.0)
         rows = candidate.fork_comparison(baseline, faster, 'faer-fork')
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['cell'][3], 'c', 'the memory order must stay part of the cell key')
         self.assertAlmostEqual(rows[0]['rotation_averaged_ratio'], 0.5, places=9)
         self.assertFalse(candidate.identity_differences(baseline, faster))
 
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SameMeasuredCodeTest(unittest.TestCase):
+    fork = pathlib.Path('/home/shinaoka/projects/tensor4all/faer')
+    paths = ('faer/src', 'faer/Cargo.toml', 'Cargo.lock')
+
+    def git(self, path, *args):
+        import subprocess
+        return subprocess.run(['git', '-C', str(path), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def test_docs_only_revision_is_the_same_code_and_an_older_one_is_not(self):
+        if not (self.fork / '.git').exists():
+            self.skipTest('fork checkout not present')
+        commits = self.git(self.fork, 'log', '--format=%H', '--all', '-60').split()
+        if len(commits) < 3:
+            self.skipTest('not enough history')
+        self.assertEqual(candidate.same_measured_code(self.fork, commits[0], commits[0], self.paths,
+                                                      git=self.git), [])
+        self.assertTrue(candidate.same_measured_code(self.fork, commits[0], commits[-1], self.paths,
+                                                     git=self.git),
+                        'two revisions 60 commits apart must differ in the measured paths')
