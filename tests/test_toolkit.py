@@ -356,6 +356,27 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertNotIn("second-campaign", text)
 
 
+class CampaignSchemaTest(unittest.TestCase):
+    """A descriptor without cargo features must load: some campaigns pick their vendor by environment."""
+
+    def test_features_are_optional(self):
+        import copy
+        import json
+
+        import yaml
+
+        from campaign_toolkit import jsonschema_lite
+        fixture = pathlib.Path(__file__).parent / 'fixture/benchmarks/campaign.yaml'
+        schema = json.loads((pathlib.Path(__file__).parent.parent
+                             / 'campaign_toolkit/schemas/campaign.schema.json').read_text())
+        descriptor = yaml.safe_load(fixture.read_text())
+        jsonschema_lite.validate(descriptor, schema)                    # the fixture, with features
+        without = copy.deepcopy(descriptor)
+        without['measured'].pop('features')
+        jsonschema_lite.validate(without, schema)                       # accepted: vendor from the environment
+        self.assertNotIn('features', schema['properties']['measured']['required'])
+
+
 class ToolkitRepositoryTest(unittest.TestCase):
     def test_shared_profile_library(self):
         profile = descriptor.shared_profile("zen5-cpu")

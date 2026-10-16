@@ -50,7 +50,6 @@
         "extern_dir",
         "build_script",
         "binary",
-        "features",
         "pin_env"
       ],
       "additionalProperties": false,
@@ -81,9 +80,8 @@
           "minLength": 1
         },
         "features": {
-          "description": "The harness feature per vendor arm: one binary links one vendor library, so the arm decides the feature.",
+          "description": "The harness feature per vendor arm, when the build selects its vendor with a cargo feature. Campaigns whose build script takes the vendor from the environment (for example `BENCH_VENDOR`, which the recorder always exports) omit this: the field is optional and is never read by the recorder.",
           "type": "object",
-          "minProperties": 1,
           "additionalProperties": {
             "type": "string",
             "minLength": 1
@@ -265,12 +263,27 @@
     "timing": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version"],
+      "required": [
+        "version"
+      ],
       "properties": {
-        "version": {"enum": [2]},
-        "aa": {"type": "integer", "minimum": 2},
-        "reps": {"type": "integer", "minimum": 2},
-        "prime_ms": {"type": "integer", "minimum": 1}
+        "version": {
+          "enum": [
+            2
+          ]
+        },
+        "aa": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "reps": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "prime_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "csv_columns": {
