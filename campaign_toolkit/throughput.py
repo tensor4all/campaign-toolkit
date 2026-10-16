@@ -179,7 +179,7 @@ def render_panel(layout, family, threads, blocks, coefficient, origin, series):
     return '<g>' + ''.join(out) + '</g>'
 
 
-def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64'):
+def render_family(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):
     """Returns (svg, dropped_tick_labels) so a caller can report a crowded axis."""
     """One SVG: a panel per thread budget, stacked so a page does not have to scale the text down."""
     layout = Layout()
@@ -188,7 +188,7 @@ def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
            layout.text(12, 30, FONT['title'], f'{family}: nominal GFLOP/s vs n')]
     for index, threads in enumerate(budgets):
-        blocks = {spec['engine']: points(cells_by_run[spec['run']], threads, family, spec['engine'],
+        blocks = {spec['engine']: points(cells_by_engine[spec['engine']], threads, family, spec['engine'],
                                          family_spec['coefficient'], complex_dtype=dtype == 'c64')
                   for spec in series}
         svg.append(render_panel(layout, family, threads, blocks, family_spec['coefficient'],
@@ -197,14 +197,14 @@ def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64
     return '\n'.join(svg) + '\n', layout.dropped
 
 
-def data_markdown(family, family_spec, series, cells_by_run, budgets, dtype='f64'):
+def data_markdown(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):
     lines = [f'# {family} - plotted data (nominal GFLOP/s)', '',
              f'Nominal operation count: `{family_spec["label"]}`. Each value is the median of the process',
              'medians for that cell, `+-` is the between-start sample SD, a dot means that row is not',
              'measured in that arm, and the chart of the same name holds the same numbers.', '']
     for threads in budgets:
         table = {spec['engine']: {x: (y, err) for x, y, err in
-                                  points(cells_by_run[spec['run']], threads, family, spec['engine'],
+                                  points(cells_by_engine[spec['engine']], threads, family, spec['engine'],
                                          family_spec['coefficient'], complex_dtype=dtype == 'c64')}
                  for spec in series}
         sizes = sorted({x for rows in table.values() for x in rows})
