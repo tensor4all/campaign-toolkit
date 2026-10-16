@@ -280,8 +280,15 @@ def vendor_identity(binary, env, threads=None):
     """
     command = [str(binary), 'info']
     if threads is not None:
-        command += ['--threads', str(threads)]
-    out = subprocess.run(command, capture_output=True, text=True, env=env)
+        # A v2 run asks `info` about the budget it is about to use, because a harness may report its
+        # vendor identity at that budget. Harnesses whose `info` takes no arguments (the older
+        # campaigns' CLIs) are still usable: the plain form is tried next, and the failure of the
+        # first is not reported as a build problem.
+        out = subprocess.run(command + ['--threads', str(threads)], capture_output=True, text=True, env=env)
+        if out.returncode != 0:
+            out = subprocess.run(command, capture_output=True, text=True, env=env)
+    else:
+        out = subprocess.run(command, capture_output=True, text=True, env=env)
     if out.returncode != 0:
         sys.exit(f"ERROR: {binary} info failed: {out.stderr.strip()}")
     fields = {}

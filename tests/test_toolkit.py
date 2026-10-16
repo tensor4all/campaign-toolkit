@@ -377,6 +377,31 @@ class CampaignSchemaTest(unittest.TestCase):
         self.assertNotIn('features', schema['properties']['measured']['required'])
 
 
+class VendorIdentityTest(unittest.TestCase):
+    def test_vendor_identity_falls_back_to_plain_info(self):
+        """A harness whose `info` takes no arguments is still usable (older campaign CLIs)."""
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(list(command))
+            ok = command == ['/bin/b', 'info']
+            return subprocess.CompletedProcess(command, 0 if ok else 2, stdout='vendor.name=mkl\n' if ok else '',
+                                               stderr='' if ok else 'usage')
+
+        with mock.patch.object(record_run.subprocess, 'run', side_effect=fake_run):
+            fields = record_run.vendor_identity('/bin/b', {}, threads=4)
+        self.assertEqual(fields, {'vendor.name': 'mkl'})
+        self.assertEqual(calls, [['/bin/b', 'info', '--threads', '4'], ['/bin/b', 'info']])
+
+    def test_vendor_identity_still_fails_when_neither_form_works(self):
+        def fake_run(command, **kwargs):
+            return subprocess.CompletedProcess(command, 2, stdout='', stderr='usage')
+
+        with mock.patch.object(record_run.subprocess, 'run', side_effect=fake_run):
+            with self.assertRaisesRegex(SystemExit, 'info failed'):
+                record_run.vendor_identity('/bin/b', {}, threads=4)
+
+
 class ToolkitRepositoryTest(unittest.TestCase):
     def test_shared_profile_library(self):
         profile = descriptor.shared_profile("zen5-cpu")
