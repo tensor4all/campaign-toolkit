@@ -134,11 +134,20 @@ def render_panel(layout, family, threads, blocks, coefficient, origin, series):
     scale_y = lambda v: y0 + height - (math.log10(max(v, 1e-6)) - ly0) / (ly1 - ly0) * height  # noqa: E731
     out = [f'<rect x="{ox + 6}" y="{oy + 6}" width="{PANEL_W - 12}" height="{PANEL_H - 12}" fill="#ffffff" '
            f'stroke="#d0d0d0"/>', layout.text(ox + 16, oy + 32, FONT['panel'], f'{threads}T')]
-    for size in sorted(set(xs)):
+    sizes = sorted(set(xs))
+    # Label every other size when the axis would crowd, and always the largest one - dropping the
+    # label of the last point instead would hide where the curve ends.
+    labelled = [index for index in range(len(sizes)) if index % (2 if len(sizes) > 6 else 1) == 0]
+    if labelled and len(sizes) - 1 not in labelled:
+        labelled.append(len(sizes) - 1)
+    if len(labelled) > 1 and labelled[-1] - labelled[-2] == 1:
+        labelled.pop(-2)
+    for index, size in enumerate(sizes):
         out.append(f'<line x1="{scale_x(size):.1f}" y1="{y0}" x2="{scale_x(size):.1f}" y2="{y0 + height}" '
                    f'stroke="#f2f2f2"/>')
-        out.append(layout.tick(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
-                               panel=panel_key))
+        if index in labelled:
+            out.append(layout.tick(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
+                                   panel=panel_key))
     for power in range(math.ceil(ly0), math.floor(ly1) + 1):
         value = 10.0 ** power
         out.append(f'<line x1="{x0}" y1="{scale_y(value):.1f}" x2="{x0 + width}" y2="{scale_y(value):.1f}" '
@@ -179,7 +188,7 @@ def render_panel(layout, family, threads, blocks, coefficient, origin, series):
     return '<g>' + ''.join(out) + '</g>'
 
 
-def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64'):
+def render_family(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):
     """Returns (svg, dropped_tick_labels) so a caller can report a crowded axis."""
     """One SVG: a panel per thread budget, stacked so a page does not have to scale the text down."""
     layout = Layout()
@@ -188,7 +197,7 @@ def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
            layout.text(12, 30, FONT['title'], f'{family}: nominal GFLOP/s vs n')]
     for index, threads in enumerate(budgets):
-        blocks = {spec['engine']: points(cells_by_run[spec['run']], threads, family, spec['engine'],
+        blocks = {spec['engine']: points(cells_by_engine[spec['engine']], threads, family, spec['engine'],
                                          family_spec['coefficient'], complex_dtype=dtype == 'c64')
                   for spec in series}
         svg.append(render_panel(layout, family, threads, blocks, family_spec['coefficient'],
@@ -197,14 +206,14 @@ def render_family(family, family_spec, series, cells_by_run, budgets, dtype='f64
     return '\n'.join(svg) + '\n', layout.dropped
 
 
-def data_markdown(family, family_spec, series, cells_by_run, budgets, dtype='f64'):
+def data_markdown(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):
     lines = [f'# {family} - plotted data (nominal GFLOP/s)', '',
              f'Nominal operation count: `{family_spec["label"]}`. Each value is the median of the process',
              'medians for that cell, `+-` is the between-start sample SD, a dot means that row is not',
              'measured in that arm, and the chart of the same name holds the same numbers.', '']
     for threads in budgets:
         table = {spec['engine']: {x: (y, err) for x, y, err in
-                                  points(cells_by_run[spec['run']], threads, family, spec['engine'],
+                                  points(cells_by_engine[spec['engine']], threads, family, spec['engine'],
                                          family_spec['coefficient'], complex_dtype=dtype == 'c64')}
                  for spec in series}
         sizes = sorted({x for rows in table.values() for x in rows})
@@ -246,14 +255,23 @@ def write_report(run_dirs, config, out_dir, budgets=(1, 4, 8), dtype='f64', orde
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     cells_by_run = [load_run(run_dir, dtype=dtype, order=order) for run_dir in run_dirs]
+    # A series may name several runs (a daily suite and the large-tier suite, say): the cells are
+    # merged, and a size measured in both keeps the later run's value.
+    cells_by_series = {}
+    for spec in config['series']:
+        indexes = spec['run'] if isinstance(spec['run'], list) else [spec['run']]
+        merged = {}
+        for index in indexes:
+            merged.update(cells_by_run[index])
+        cells_by_series[spec['engine']] = merged
     written, dropped = [], []
     for family, family_spec in config['families'].items():
-        svg, skipped = render_family(family, family_spec, config['series'], cells_by_run, budgets, dtype)
+        svg, skipped = render_family(family, family_spec, config['series'], cells_by_series, budgets, dtype)
         dropped += [f'{family}:{label}' for label in skipped]
         version = config.get('version', 'v1')
         (out_dir / f'throughput-{family}-{version}.svg').write_text(svg)
         (out_dir / f'throughput-{family}-{version}.md').write_text(
-            data_markdown(family, family_spec, config['series'], cells_by_run, budgets, dtype))
+            data_markdown(family, family_spec, config['series'], cells_by_series, budgets, dtype))
         written.append(family)
     (out_dir / 'README.md').write_text(page_markdown(config, written, budgets, dtype))
     return written, dropped
