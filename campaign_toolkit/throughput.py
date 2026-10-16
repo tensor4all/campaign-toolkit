@@ -246,14 +246,23 @@ def write_report(run_dirs, config, out_dir, budgets=(1, 4, 8), dtype='f64', orde
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     cells_by_run = [load_run(run_dir, dtype=dtype, order=order) for run_dir in run_dirs]
+    # A series may name several runs (a daily suite and the large-tier suite, say): the cells are
+    # merged, and a size measured in both keeps the later run's value.
+    cells_by_series = {}
+    for spec in config['series']:
+        indexes = spec['run'] if isinstance(spec['run'], list) else [spec['run']]
+        merged = {}
+        for index in indexes:
+            merged.update(cells_by_run[index])
+        cells_by_series[spec['engine']] = merged
     written, dropped = [], []
     for family, family_spec in config['families'].items():
-        svg, skipped = render_family(family, family_spec, config['series'], cells_by_run, budgets, dtype)
+        svg, skipped = render_family(family, family_spec, config['series'], cells_by_series, budgets, dtype)
         dropped += [f'{family}:{label}' for label in skipped]
         version = config.get('version', 'v1')
         (out_dir / f'throughput-{family}-{version}.svg').write_text(svg)
         (out_dir / f'throughput-{family}-{version}.md').write_text(
-            data_markdown(family, family_spec, config['series'], cells_by_run, budgets, dtype))
+            data_markdown(family, family_spec, config['series'], cells_by_series, budgets, dtype))
         written.append(family)
     (out_dir / 'README.md').write_text(page_markdown(config, written, budgets, dtype))
     return written, dropped
