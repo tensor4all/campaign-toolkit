@@ -72,6 +72,7 @@ class CandidateTest(unittest.TestCase):
         faster = make_run(self.root, 'faster', library='candidate', fork_ms=5.0)
         rows = candidate.fork_comparison(baseline, faster, 'faer-fork')
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['cell'][3], 'c', 'the memory order must stay part of the cell key')
         self.assertAlmostEqual(rows[0]['rotation_averaged_ratio'], 0.5, places=9)
         self.assertFalse(candidate.identity_differences(baseline, faster))
 

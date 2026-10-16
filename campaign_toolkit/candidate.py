@@ -62,7 +62,7 @@ def identity_differences(baseline, candidate):
 
 
 def series(run_dir, engine, repetitions):
-    """{(threads, family, dtype, shape, note): {repeat: median ms}} for one engine row."""
+    """{(threads, family, dtype, order, shape, note): {repeat: median ms}} for one engine row."""
     run_dir = pathlib.Path(run_dir)
     manifest = _manifest(run_dir)
     rows = {}
@@ -72,7 +72,9 @@ def series(run_dir, engine, repetitions):
             for row in csv.DictReader(handle):
                 if row['status'] != 'ok' or row['row'] != engine:
                     continue
-                key = (int(row['threads']), row['family'], row['dtype'],
+                # The memory order is part of a cell's identity: an optimization that only
+                # changes the row-major path must never be averaged with the column-major one.
+                key = (int(row['threads']), row['family'], row['dtype'], row['order'],
                        f"{row['m']}x{row['n']}" + (f"x{row['k']}" if row['k'] else ''), row['note'])
                 rows.setdefault(key, {})[repeat] = statistics.median(
                     timing_evidence.samples(row, repetitions))
