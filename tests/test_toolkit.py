@@ -164,6 +164,14 @@ class FixtureCampaignTest(unittest.TestCase):
             record_run.require_observer_off_measured_cpus({'1': '4'})
             self.assertIn('shares them with the measurement', loud.getvalue())
 
+    def test_host_role_defaults_to_development_and_can_be_the_measurement_host(self):
+        with (mock.patch.object(record_run.platform, 'node', return_value='x'),
+              mock.patch.object(record_run, 'host_info', wraps=record_run.host_info)):
+            profiles = [{'name': 'p', 'cpu': 'c', 'logical_cpus': 1, 'l3': 'l', 'role': 'measurement'}]
+            self.assertEqual(record_run.host_info('p', profiles)['role'], 'measurement')
+            profiles[0].pop('role')
+            self.assertEqual(record_run.host_info('p', profiles)['role'], 'development')
+
     def test_boost_on_is_refused_and_can_be_recorded(self):
         record_run.require_boost_disabled({'cpufreq_boost': '0'})              # disabled: no exit
         record_run.require_boost_disabled({})                                  # not exposed: no exit

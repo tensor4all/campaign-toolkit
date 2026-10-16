@@ -290,6 +290,10 @@ def render(manifest, suite, rows, run_dir):
         *([f"- toolkit commit: `{manifest['toolkit']['commit']}`",
            f"- measured binary SHA-256: `{manifest['binary']['sha256']}`"] if v2 else []),
         f"- hardware profile: `{manifest['target_profile']}`",
+        f"- host role: `{(manifest.get('host') or {}).get('role', 'development')}`"
+        + (" — **provisional**: recorded on a development host, superseded by the measurement"
+           " host's dataset" if (manifest.get('host') or {}).get('role', 'development') != 'measurement'
+           else " — published dataset host"),
         f"- timestamp: `{manifest['timestamp']}`",
         f"- timing policy: v{manifest['timing_policy']['version']}, "
         f"{manifest['timing_policy']['statistic']} of {manifest['timing_policy']['repetitions']} reps, "
