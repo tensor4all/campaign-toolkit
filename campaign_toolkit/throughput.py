@@ -134,11 +134,14 @@ def render_panel(layout, family, threads, blocks, coefficient, origin, series):
     scale_y = lambda v: y0 + height - (math.log10(max(v, 1e-6)) - ly0) / (ly1 - ly0) * height  # noqa: E731
     out = [f'<rect x="{ox + 6}" y="{oy + 6}" width="{PANEL_W - 12}" height="{PANEL_H - 12}" fill="#ffffff" '
            f'stroke="#d0d0d0"/>', layout.text(ox + 16, oy + 32, FONT['panel'], f'{threads}T')]
-    for size in sorted(set(xs)):
+    sizes = sorted(set(xs))
+    step = 2 if len(sizes) > 6 else 1        # label every other size when the axis would crowd
+    for index, size in enumerate(sizes):
         out.append(f'<line x1="{scale_x(size):.1f}" y1="{y0}" x2="{scale_x(size):.1f}" y2="{y0 + height}" '
                    f'stroke="#f2f2f2"/>')
-        out.append(layout.tick(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
-                               panel=panel_key))
+        if index % step == 0 or size == sizes[-1]:
+            out.append(layout.tick(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
+                                   panel=panel_key))
     for power in range(math.ceil(ly0), math.floor(ly1) + 1):
         value = 10.0 ** power
         out.append(f'<line x1="{x0}" y1="{scale_y(value):.1f}" x2="{x0 + width}" y2="{scale_y(value):.1f}" '
