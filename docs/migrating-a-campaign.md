@@ -72,3 +72,34 @@ files, so the suite declaration should be generated from them and committed, not
 - `host.power` records boost/governor/EPP; the recorder refuses to measure with boost on.
 - Every campaign's `AGENTS.md` points at its `docs/rules.md` equivalent, and `faer-benchmark/docs/rules.md`
   is the model for the runbook text.
+
+## The harness side: what the timing-v2 contract requires of the measured repo
+
+A campaign can be migrated on the campaign side in an afternoon (descriptor, shims, pin, declarations),
+but the *harness* must speak the v2 CLI or the recorder stops at its first verify. Measured on
+2026-10-16 with `tlbench` at `tlinalg-rs` `f44d1f5`:
+
+```
+usage: tlbench info | verify --threads N --n LIST [--batch LIST] [--dtype LIST] [--family LIST]
+```
+
+That is the v1 surface. The v2 contract adds, and `faer-benchmark/fbench` is the reference
+implementation of all of it:
+
+| what | v1 (as found) | v2 contract |
+| --- | --- | --- |
+| `verify` arguments | `--threads --n --batch --dtype --family` | plus `--regime LABEL --csv PATH`, and a final `all comparisons within tolerance` line on success |
+| verification census | none | one CSV row per (regime, family, dtype, order, shape, batch, engine row, budget) with `status` and `note`, including declared skips |
+| `run` statistics | one reduced number per row | `--statistic best\|median`, `--reps M`, `--prime-ms MS`, and the chronological calls in a `samples_ms` column |
+| thread budgets | the harness' own choice | per-row `rayon_threads` and `vendor_threads` columns that echo the requested budget |
+| row rotation | none | rotate the engine rows per process start (`--rotate-rows K`), which is what makes an acceptance comparison position-balanced |
+| CSV columns | campaign-specific | exactly the campaign's `csv_columns` (the toolkit refuses a manifest whose columns are missing) |
+
+Worked example for the two sibling campaigns: add the census + samples + rotation + thread readback to
+`tlinalg-rs`'s `tlbench` and to `tcontract-rs`'s harness - a PR in each measured repository, with a test
+that the census covers every declared cell and that a skipped family is reported rather than dropped -
+then the campaign-side migration is finished by recording and publishing.
+
+Also recorded while doing this: campaigns whose build selects the vendor with `BENCH_VENDOR` need no
+`measured.features` (the recorder always exports the variable, and the field is now optional), and a
+harness whose `info` takes no `--threads` is accepted through the plain-`info` fallback.
