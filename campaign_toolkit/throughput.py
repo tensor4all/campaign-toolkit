@@ -135,11 +135,17 @@ def render_panel(layout, family, threads, blocks, coefficient, origin, series):
     out = [f'<rect x="{ox + 6}" y="{oy + 6}" width="{PANEL_W - 12}" height="{PANEL_H - 12}" fill="#ffffff" '
            f'stroke="#d0d0d0"/>', layout.text(ox + 16, oy + 32, FONT['panel'], f'{threads}T')]
     sizes = sorted(set(xs))
-    step = 2 if len(sizes) > 6 else 1        # label every other size when the axis would crowd
+    # Label every other size when the axis would crowd, and always the largest one - dropping the
+    # label of the last point instead would hide where the curve ends.
+    labelled = [index for index in range(len(sizes)) if index % (2 if len(sizes) > 6 else 1) == 0]
+    if labelled and len(sizes) - 1 not in labelled:
+        labelled.append(len(sizes) - 1)
+    if len(labelled) > 1 and labelled[-1] - labelled[-2] == 1:
+        labelled.pop(-2)
     for index, size in enumerate(sizes):
         out.append(f'<line x1="{scale_x(size):.1f}" y1="{y0}" x2="{scale_x(size):.1f}" y2="{y0 + height}" '
                    f'stroke="#f2f2f2"/>')
-        if index % step == 0 or size == sizes[-1]:
+        if index in labelled:
             out.append(layout.tick(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
                                    panel=panel_key))
     for power in range(math.ceil(ly0), math.floor(ly1) + 1):
