@@ -47,6 +47,13 @@ vendor_env:
   - OPENBLAS_NUM_THREADS
   - OMP_NUM_THREADS
 
+# The harness loads the external baseline from its own installation, so that installation's
+# lib directories go on the measured process's loader path. The fixture names them through an
+# environment variable, the way a real campaign names its external provider's root.
+loader_paths:
+  - "$FIXTURE_EXT_ROOT/lib"
+  - "$FIXTURE_EXT_ROOT/lib64"
+
 csv_columns:
   - regime
   - family

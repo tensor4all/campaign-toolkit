@@ -58,6 +58,14 @@
         "minLength": 1
       }
     },
+    "features": {
+      "description": "Cargo features the harness is built with. The recorder exports them to the build as `BENCH_FEATURES` (comma separated, the empty string when this is absent), which is how a build script selects a feature-gated arm.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "family_groups": {
       "description": "Named sets of families. A population refers to groups instead of repeating family lists, so a family added to a group is measured by every population that declares it.",
       "type": "object",

@@ -230,6 +230,17 @@ class Descriptor:
         return tuple(self.data.get("vendor_env", []))
 
     @property
+    def loader_paths(self) -> list:
+        """Directories prepended to the measured process's `LD_LIBRARY_PATH`.
+
+        A harness that loads a library built outside the measured checkout needs that library's
+        directory on the loader path. The campaign names the directories here, so the toolkit
+        holds no vendor's installation layout; an empty declaration leaves the measured process's
+        environment exactly as the recorder found it.
+        """
+        return list(self.data.get("loader_paths", []))
+
+    @property
     def csv_columns(self) -> list:
         return list(self.data.get("csv_columns", []))
 

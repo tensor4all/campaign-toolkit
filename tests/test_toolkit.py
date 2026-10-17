@@ -180,6 +180,62 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertEqual(len(runs), 1, f'expected one {label} run under {suite_id}')
         return runs[0]
 
+    def _record_capturing_env(self, suite_id, label, source_csv, extra=(), identity=None,
+                              external_json=None):
+        """Record one run with the *real* `build()`, whose `sh` writes the pin file, and capture
+        the environment each child is given: the build's and the measured process's."""
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        build_envs, run_envs = [], []
+
+        def fake_sh(cmd, **kwargs):
+            build_envs.append(kwargs['env'])
+            out = pathlib.Path(next(a for a in cmd if str(a).endswith('.env')))
+            # Stand in for the campaign's build script: write the variable file the recorder reads
+            # back, carrying the features it was invoked with the way a real build script does.
+            out.write_text(f"FIXTURE_REV={original['library']['commit']}\n"
+                           "FIXTURE_DIRTY=false\n"
+                           f"FIXTURE_DIR={self.checkout}\n"
+                           f"BUILD_FEATURES={kwargs['env'].get('BENCH_FEATURES', '')}\n"
+                           f"BIN_DIR={self.root}\n")
+            return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
+
+        def process(args, **kwargs):
+            if 'verify' in args or 'run' in args:
+                run_envs.append(kwargs.get('env') or {})
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            elif 'campaign_toolkit.report_run' in args:
+                (pathlib.Path(args[args.index('--run-dir') + 1])
+                 / 'report.md').write_text('placeholder\n')
+            return subprocess.CompletedProcess(args, 0,
+                                               stdout='all comparisons within tolerance', stderr='')
+
+        def child(module, args, **kwargs):
+            if module == 'validate_run':
+                errors = validate_run.validate(args[0])
+                return subprocess.CompletedProcess(args, 1 if errors else 0,
+                                                   stdout='\n'.join(errors), stderr='')
+            return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+
+        argv = ['fixture-cpu', suite_id, '--threads', '1', '--label', label, '--no-publish', *extra]
+        if external_json is not None:
+            argv += ['--external-provider-json', str(external_json)]
+        with (mock.patch.object(record_run, 'sh', side_effect=fake_sh),
+              mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
+                                original['library']['commit'] if a[0] == 'rev-parse' else ''),
+              mock.patch.object(record_run, 'protocol_script',
+                                return_value=descriptor.current().profiles_file),
+              mock.patch.object(record_run, 'vendor_identity', return_value=identity or {}),
+              mock.patch.object(record_run, 'host_info', return_value=original['host']),
+              mock.patch.object(record_run.subprocess, 'run', side_effect=process),
+              mock.patch.object(descriptor, 'run_module', side_effect=child)):
+            self.assertEqual(record_run.main(argv, root=self.root), 0)
+        runs = sorted((self.root / 'data/results/fixture-cpu' / suite_id).glob(f'*-{label}'))
+        self.assertEqual(len(runs), 1, f'expected one {label} run under {suite_id}')
+        return runs[0], build_envs, run_envs
+
     def _external_source_csv(self):
         source = self.root / 'external-source.csv'
         source.write_text(
@@ -244,6 +300,55 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertTrue(all('tag' not in p for p in manifest['providers']))
         self.assertEqual(report_run.main(['--run-dir', str(run_dir)], root=self.root), 0)
         self.assertNotIn('- external providers:', (run_dir / 'report.md').read_text())
+
+    def test_suite_features_and_loader_paths_reach_the_child_processes(self):
+        # The suite's `features` are what the build is invoked with, as `BENCH_FEATURES`, and the
+        # descriptor's loader directories go on the measured process's `LD_LIBRARY_PATH` ahead of
+        # whatever the recorder inherited. The fixture's external suite declares both.
+        source = self._external_source_csv()
+        with mock.patch.dict(os.environ, {'FIXTURE_EXT_ROOT': '/opt/fixture-ext',
+                                          'LD_LIBRARY_PATH': '/inherited/lib'}):
+            run_dir, build_envs, run_envs = self._record_capturing_env(
+                'fixture-external', 'features', source,
+                external_json=self.root / 'pins/external-providers.json')
+        self.assertEqual(build_envs[0]['BENCH_FEATURES'], 'fixture-bench/link-tblis')
+        self.assertTrue(run_envs)
+        for env in run_envs:
+            self.assertEqual(env['LD_LIBRARY_PATH'],
+                             '/opt/fixture-ext/lib:/opt/fixture-ext/lib64:/inherited/lib')
+        # The build round-trips the features into the manifest's library block.
+        self.assertEqual(campaign.load(run_dir / 'run.yaml')['library']['features'],
+                         ['fixture-bench/link-tblis'])
+
+    def test_vendor_arm_feature_is_added_to_the_build_features(self):
+        # `measured.features` is the descriptor's per-arm feature: the recorder reads it, so a
+        # vendor-selected build is invoked with the feature that arm needs. The fixture's
+        # kernels suite declares none of its own, so the arm's entry is the whole list.
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source = self.root / RUN_A_REL / original['result_files'][0]
+        with mock.patch.dict(os.environ, {'FIXTURE_EXT_ROOT': '/opt/fixture-ext'}):
+            _, build_envs, run_envs = self._record_capturing_env(
+                'fixture-kernels', 'armfeature', source,
+                extra=['--vendor', 'openblas'], identity={'vendor.name': 'openblas'})
+        self.assertEqual(build_envs[0]['BENCH_FEATURES'], 'fixture-bench/link-openblas')
+        self.assertEqual(run_envs[0]['LD_LIBRARY_PATH'].split(os.pathsep)[:2],
+                         ['/opt/fixture-ext/lib', '/opt/fixture-ext/lib64'])
+
+    def test_absent_loader_paths_leave_the_environment_alone(self):
+        # A campaign that declares no loader directories behaves exactly as before: the recorder
+        # does not touch the measured process's LD_LIBRARY_PATH.
+        import yaml as _yaml
+        path = self.root / 'benchmarks/campaign.yaml'
+        data = _yaml.safe_load(path.read_text())
+        data.pop('loader_paths')
+        path.write_text(_yaml.safe_dump(data, sort_keys=False))
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source = self.root / RUN_A_REL / original['result_files'][0]
+        with mock.patch.dict(os.environ, {'LD_LIBRARY_PATH': '/inherited/lib'}):
+            _, _, run_envs = self._record_capturing_env(
+                'fixture-kernels', 'noloader', source,
+                extra=['--vendor', 'openblas'], identity={'vendor.name': 'openblas'})
+        self.assertEqual(run_envs[0]['LD_LIBRARY_PATH'], '/inherited/lib')
 
     def test_observer_affinity_must_miss_the_measured_l3_domain(self):
         # CPU 7 is not measured when the cell runs on CPU 4, but it shares the cache: the observer

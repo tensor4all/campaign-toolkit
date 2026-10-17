@@ -80,7 +80,7 @@
           "minLength": 1
         },
         "features": {
-          "description": "The harness feature per vendor arm, when the build selects its vendor with a cargo feature. Campaigns whose build script takes the vendor from the environment (for example `BENCH_VENDOR`, which the recorder always exports) omit this: the field is optional and is never read by the recorder.",
+          "description": "The harness feature per vendor arm, when the build selects its vendor with a cargo feature. The recorder appends the selected arm's entry to the suite's own `features` and exports the result to the build as `BENCH_FEATURES`. A campaign whose build script takes the vendor from the environment (for example `BENCH_VENDOR`, which the recorder always exports) omits this: the field is optional.",
           "type": "object",
           "additionalProperties": {
             "type": "string",
@@ -260,6 +260,14 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "loader_paths": {
+      "description": "Directories prepended to the measured process's `LD_LIBRARY_PATH`, so the harness can load a library built outside the measured checkout (the `lib`/`lib64` directories of an external provider's installation, for example). Each path is expanded from the environment, so a campaign may write `$SOME_ROOT/lib`; an inherited `LD_LIBRARY_PATH` is kept after them. A campaign that declares none leaves the variable exactly as the recorder found it.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "vendor_env": {
       "description": "Thread-budget and tuning variables that belong to a vendor library, removed from the measured process's environment.",
