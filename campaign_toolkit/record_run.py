@@ -117,24 +117,29 @@ def warn_if_measured_cpus_span_l3_domains(cpu_sets):
 
 
 def require_observer_off_measured_cpus(cpu_sets):
-    """Refuse to record from a process that may be scheduled onto a measured CPU.
+    """Refuse to record from a process that may run inside a measured L3 domain.
 
     Keeping unrelated work off the measured cores is an operator precondition, not something the
-    idle guard can repair after the fact: this process is the observer, and its children inherit
-    its affinity, so an unpinned recorder can land on the very cores it measures. Fail before the
-    build rather than record a number nobody can trust. The suggested pin is derived from this
-    machine's topology, not from a hardcoded CPU list.
+    idle guard can repair after the fact: this process is the observer, its children inherit its
+    affinity, and a core in the same last-level cache contends for the cache the measured cores are
+    using - which is exactly what the idle guard watches for. So the test is the domain, not only
+    the measured cores: a 1-thread cell on CPU 4 does not make CPU 7 a safe place for the observer.
+    Fail before the build rather than record a number nobody can trust. The suggested pin is derived
+    from this machine's topology, not from a hardcoded CPU list.
     """
-    measured = measured_cpus(cpu_sets)
+    domains = set()
+    for spec in cpu_sets.values():
+        for cpu in parse_cpu_list(spec):
+            domains |= l3_domain(cpu)
     free_cpus = observer_cpus(cpu_sets)
     mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
-    shared = sorted(mine & measured)
+    shared = sorted(mine & domains)
     if shared:
         free = ", ".join(f"{low}" if high == low else f"{low}-{high}"
                          for low, high in ranges(sorted(free_cpus)))
-        sys.exit(f"ERROR: this recording process may run on measured CPUs {shared} "
-                 f"(measured set with siblings: {sorted(measured)}); pin the observing side off the "
-                 f"measured L3 domain, for example `taskset -c {free or '?'} python3 <recorder> ...`")
+        sys.exit(f"ERROR: this recording process may run on CPUs {shared}, inside the measured L3 "
+                 f"domain(s) {sorted(domains)}; pin the observing side off them, for example "
+                 f"`taskset -c {free or '?'} python3 <recorder> ...`")
     if not free_cpus:
         # A machine with a single L3 domain (a small CI runner, a laptop with one CCX) cannot
         # separate the observer from the measurement. That is a fact about the host, not an
