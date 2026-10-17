@@ -23,6 +23,7 @@ the descriptor, the toolkit pin, the v2 evidence contract and the measurement pr
 1. **Descriptor** `benchmarks/campaign.yaml` (model: `faer-benchmark`): `measured` (name, url, pin file,
    extern dir, build script, binary, features or build env, `build_argv`, `pin_env`, `protocol`),
    `identities`, `profiles_file`, `suites_dir`, `data_dir`, `result_dir`, `engines`, `vendor_providers`,
+   `external_providers` (a separately built baseline, when the campaign records one),
    `vendor_env`, `csv_columns`, `case_axes`/`case_label`, `page_name` (add `{timing}`), `report`,
    `default_invalidated_by`, `timing: {version: 2}`.
 2. **Shims**: replace each copied script with a three-line shim over the toolkit, as

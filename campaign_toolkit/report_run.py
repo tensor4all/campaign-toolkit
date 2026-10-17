@@ -180,6 +180,10 @@ def provider_text(prov):
         text += f" {prov['version']}"
     if prov.get("commit"):
         text += f" @ `{prov['commit']}`"
+    if prov.get("tag"):
+        text += f" tag `{prov['tag']}`"
+    if prov.get("sha256"):
+        text += f" sha256 `{prov['sha256']}`"
     if prov.get("note"):
         text += f" ({prov['note']})"
     return text
@@ -258,8 +262,12 @@ def render(manifest, suite, rows, run_dir):
     vendor = manifest.get("vendor") or {}
     library = manifest["library"]
     upstream = manifest.get("upstream") or {}
-    deps = ([p for p in manifest.get("providers", []) if p["name"] in d.provider_packages]
-            or [p for p in manifest.get("providers", []) if p["name"] in d.measured_providers])
+    providers = manifest.get("providers", [])
+    deps = ([p for p in providers if p["name"] in d.provider_packages]
+            or [p for p in providers if p["name"] in d.measured_providers])
+    # An external provider is not a Cargo dependency of the measured checkout, so it is printed
+    # on its own line rather than left to the dependency selection to include or drop.
+    external = [p for p in providers if p["name"] in d.external_providers]
     engines = manifest["run_spec"]["engines"]
     # The columns are the engines this run recorded measuring, in the declaration's order: a page
     # prints the arms it has, and a vendor arm has one LAPACK row because one binary links one
@@ -286,6 +294,7 @@ def render(manifest, suite, rows, run_dir):
           if report.get("upstream_label") else []),
         f"- features: `{', '.join(library['features']) or 'default'}`",
         *([f"- {report['provider_label']}: " + "; ".join(provider_text(p) for p in deps)] if deps else []),
+        *(["- external providers: " + "; ".join(provider_text(p) for p in external)] if external else []),
         f"- {report['harness_label']}: `{manifest['harness']['commit']}`",
         *([f"- toolkit commit: `{manifest['toolkit']['commit']}`",
            f"- measured binary SHA-256: `{manifest['binary']['sha256']}`"] if v2 else []),
@@ -325,6 +334,10 @@ def render(manifest, suite, rows, run_dir):
         if provider_of(engine) in d.measured_providers and deps:
             own = [p for p in deps if p["name"] == provider_of(engine)]
             out.append("    As measured: " + "; ".join(provider_text(p) for p in (own or deps)))
+        if provider_of(engine) in d.external_providers:
+            own = [p for p in external if p["name"] == provider_of(engine)]
+            if own:
+                out.append("    As measured: " + "; ".join(provider_text(p) for p in own))
         if engine == f"lapack-{vendor.get('name')}":
             # From the identity the harness read out of the library it linked, never from the arm
             # that was requested.

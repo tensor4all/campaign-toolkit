@@ -212,7 +212,7 @@ def toolkit_identity(root):
 
 def build(checkout, vendor, upstream=None):
     d = descriptor.current()
-    env_file = d.root / "target" / f"pin-{vendor}.env"
+    env_file = d.root / "target" / f"pin-{vendor or 'none'}.env"
     env_file.parent.mkdir(parents=True, exist_ok=True)
     template = (d.measured.get("build_argv")
                 or ["{build_script}", "{checkout}", "{out}", "{binary}"])
@@ -222,10 +222,10 @@ def build(checkout, vendor, upstream=None):
         "upstream": str(upstream) if upstream else "",
         "out": str(env_file),
         "binary": d.measured["binary"],
-        "vendor": vendor,
+        "vendor": vendor or "",
     }
     sh([token.format(**tokens) for token in template],
-       env=dict(os.environ, BENCH_VENDOR=vendor))
+       env=dict(os.environ, BENCH_VENDOR=vendor or ""))
     pin = {}
     for line in env_file.read_text().splitlines():
         if "=" not in line:
@@ -339,15 +339,56 @@ def lock_providers(lock_path):
     return out
 
 
-def providers_for(engines, vendor, deps=()):
+def load_external_providers(path):
+    """The campaign collector's external-provider identities, as a JSON list.
+
+    A provider that is not the measured library is a separately built baseline, so its revision
+    cannot come from the measured checkout. The campaign's own collector writes the identity
+    here; the recorder merges it into the manifest instead of misattributing it to the measured
+    revision.
+    """
+    try:
+        data = json.loads(pathlib.Path(path).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.exit(f"ERROR: --external-provider-json {path}: {exc}")
+    if not isinstance(data, list):
+        sys.exit(f"ERROR: --external-provider-json {path} does not hold a JSON list of providers")
+    return data
+
+
+def require_external_identities(engines, external):
+    """Refuse a run whose external arm has no stated revision.
+
+    An engine whose provider is neither the measured library nor a vendor library comes from a
+    separately built baseline. Nothing is published from an arm whose revision cannot be stated,
+    so a matching entry with a non-empty commit has to have been collected; an entry whose commit
+    is empty states nothing and is the same refusal.
+    """
+    d = descriptor.current()
+    wanted = list(dict.fromkeys(provider_of(e) for e in engines))
+    supplied = {entry.get("name"): entry for entry in external if isinstance(entry, dict)}
+    missing = [p for p in wanted
+               if p not in d.vendor_providers and p not in d.measured_providers
+               and not (supplied.get(p) or {}).get("commit")]
+    if missing:
+        names = ", ".join(repr(p) for p in missing)
+        sys.exit(f"ERROR: the suite measures the external provider(s) {names}, which are neither "
+                 f"the measured library nor a vendor library; supply --external-provider-json with "
+                 f"one entry per provider carrying a non-empty commit. Nothing is published from an "
+                 f"arm whose revision cannot be stated.")
+
+
+def providers_for(engines, vendor, deps=(), external=()):
     """The providers and vendor library this run was measured against.
 
     One entry per measured provider the run's engines name, then the measured provider's linked
-    dependencies, then the vendor. A campaign that records a baseline has two measured
-    providers, and a manifest that named only one of them would lose that library's identity.
-    The vendor entry is written from the identity the harness read out of the linked library,
-    never from the arm that was requested: the point of reading it back is that the manifest
-    records what was linked rather than what was asked for.
+    dependencies, then any external baseline the campaign collected, then the vendor. A campaign
+    that records a baseline has two measured providers, and a manifest that named only one of them
+    would lose that library's identity. An external provider is written from the campaign's own
+    collector, never as "the provider in the measured revision": its revision is not the measured
+    checkout's. The vendor entry is written from the identity the harness read out of the linked
+    library, never from the arm that was requested: the point of reading it back is that the
+    manifest records what was linked rather than what was asked for.
     """
     d = descriptor.current()
     out = []
@@ -360,6 +401,10 @@ def providers_for(engines, vendor, deps=()):
                     "note": f"the provider in the measured revision; see {where} above"})
     if set(d.measured_providers) & names:
         out.extend(deps)
+    for entry in external:
+        if (isinstance(entry, dict) and entry.get("name") in d.external_providers
+                and entry["name"] in names):
+            out.append(dict(entry))
     for provider in vendor_engines(engines):
         if vendor.get("vendor.name") != provider:
             continue
@@ -454,7 +499,13 @@ def main(argv=None, root=None):
                          "built with, whatever this says.")
     ap.add_argument("--vendor", default=None,
                     help="which vendor arm to record: one binary links one vendor library, so an arm "
-                         "is its own run. Required when the suite declares more than one.")
+                         "is its own run. Required when the suite declares more than one, and refused "
+                         "when the suite declares none.")
+    ap.add_argument("--external-provider-json", default=None, metavar="PATH",
+                    help="a JSON list of the external providers' collected identities "
+                         "(name/version/commit/path/note/tag/sha256). Required when a suite measures an "
+                         "engine whose provider is neither the measured library nor a vendor, so its "
+                         "revision is recorded rather than assumed to be the measured checkout's.")
     ap.add_argument("--label", default=None, help="suffix for the run directory")
     ap.add_argument('--no-publish', action='store_true',
                     help='retain and validate run artifacts without publishing a result page')
@@ -490,20 +541,30 @@ def main(argv=None, root=None):
     # of a cell's identity, so it is recorded and it is part of the coverage comparison.
     order = spec.get("order", [])
     arms = vendor_engines(spec["engines"])
+    if args.vendor and not arms:
+        sys.exit(f"ERROR: --vendor {args.vendor!r} was given, but this suite declares no vendor arm "
+                 f"({spec['engines']})")
     if args.vendor:
         arm = args.vendor
     elif len(arms) == 1:
         arm = arms[0]
-    else:
+    elif arms:
         sys.exit(f"ERROR: this suite declares the vendor arms {arms}, and one binary links one vendor "
                  f"library, so one run records one of them: pass --vendor")
-    if arm not in arms:
+    else:
+        # A suite with no vendor engine measures no BLAS/LAPACK vendor library: there is no arm to
+        # select, and the manifest records no vendor identity rather than an empty one.
+        arm = None
+    if arm is not None and arm not in arms:
         sys.exit(f"ERROR: --vendor {arm!r} is not one of the arms this suite declares ({arms})")
-    if arm not in d.vendor_providers:
+    if arm is not None and arm not in d.vendor_providers:
         sys.exit(f"ERROR: unknown vendor arm {arm!r}; this campaign knows {list(d.vendor_providers)}")
     # The engines this arm is expected to measure: the measured provider's rows every arm carries,
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
+    external = (load_external_providers(args.external_provider_json)
+                if args.external_provider_json else [])
+    require_external_identities(engines, external)
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
     warn_if_measured_cpus_span_l3_domains(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)
@@ -589,10 +650,11 @@ def main(argv=None, root=None):
     identity = vendor_identity(binary, env, threads[0] if v2 else None)
     if v2:
         (run_dir / 'binary-info.txt').write_text('\n'.join(f'{k}={v}' for k, v in identity.items()) + '\n')
-    if identity.get("vendor.name") != arm:
+    if arm is not None and identity.get("vendor.name") != arm:
         sys.exit(f"ERROR: this run records the {arm} arm, but the harness built for it reports "
                  f"{identity.get('vendor.name')!r}; a page may not name a vendor the binary did "
                  f"not link")
+    vendor_record = vendor_block(identity, pin.get(pin_env.get("env", "BUILD_ENV")))
 
     guards = []
     csvs = []
@@ -686,7 +748,7 @@ def main(argv=None, root=None):
             "version": (pin.get(pin_env["version"]) if pin_env.get("version") else None) or None,
         },
         **({"upstream": upstream_block} if upstream_block else {}),
-        "vendor": vendor_block(identity, pin.get(pin_env.get("env", "BUILD_ENV"))),
+        **({"vendor": vendor_record} if vendor_record else {}),
         "harness": harness,
         **({'toolkit': toolkit, 'verification_files': verification_files,
             'binary': {'path': str(binary), 'sha256': binary_sha256}} if v2 else {}),
@@ -718,7 +780,8 @@ def main(argv=None, root=None):
             "logs": sorted(set(guards)),
         },
         "providers": providers_for(engines, identity,
-                                   lock_providers(pathlib.Path(pin[pin_env["dir"]]) / "Cargo.lock")),
+                                   lock_providers(pathlib.Path(pin[pin_env["dir"]]) / "Cargo.lock"),
+                                   external),
         "invalidated_by": suite.get("invalidated_by", d.default_invalidated_by),
         "result_files": [pathlib.Path(c).name for c in csvs],
         "run_spec": {
