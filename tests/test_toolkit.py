@@ -135,12 +135,16 @@ class FixtureCampaignTest(unittest.TestCase):
             self.assertEqual('gen_index' in modules, not no_publish)
             self.assertEqual('publish_report' in modules, not no_publish)
 
-    def test_observer_affinity_must_miss_the_measured_cpus(self):
-        with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={0, 1, 2, 3}):
-            record_run.require_observer_off_measured_cpus({'1': '4'})   # disjoint: no exit
-        with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={0, 7}):
-            with self.assertRaisesRegex(SystemExit, 'may run on measured CPUs'):
-                record_run.require_observer_off_measured_cpus({'1': '4-11'})
+    def test_observer_affinity_must_miss_the_measured_l3_domain(self):
+        # CPU 7 is not measured when the cell runs on CPU 4, but it shares the cache: the observer
+        # must be refused there too.
+        with (mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}),
+              mock.patch.object(record_run, 'online_cpus', return_value={0, 1, 2, 3, 4, 5, 6, 7})):
+            with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={0, 1, 2, 3}):
+                record_run.require_observer_off_measured_cpus({'1': '4'})       # off the domain
+            with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={7}):
+                with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
+                    record_run.require_observer_off_measured_cpus({'1': '4'})
 
     def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
