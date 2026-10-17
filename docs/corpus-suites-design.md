@@ -130,6 +130,23 @@ Two policy points from the pre-review are part of this contract: a case whose dt
 whose build feature is missing (`tblis`) is an **admission failure**, not a `skipped` row, because
 `tcbench` itself rejects that configuration today.
 
+
+### Inside `tcbench`, at the same pin
+
+| what exists | where | what the v2 contract needs |
+| --- | --- | --- |
+| `engines::timed(reps, prime_ms, f) -> (best, scatter)` (time-based priming, best/worst only) | `tcbench/engines/mod.rs:156-173` | keep every call and return best or median of them, plus the caller's requested statistic |
+| `engines::timed_prepare(reps, prepare) -> (value, best)` | same file | unchanged: preparation is excluded from the timed call and stays visible |
+| `report::Results { rows: Vec<Row> }`, `Row { case, group, dtype, engine, threads, m, n, k, macs, seconds, spread, prepare_s, gflops, regular_a, regular_b, notes }`, `write_csv` | `tcbench/report.rs:40-79` | emit the toolkit's columns: `regime` (the label), `family` (the case id), `batch` (unit), `row`, `threads`, `total_ms`, `per_item_us`, `status`, `note`, `samples_ms`, `rayon_threads`, `vendor_threads`; the corpus's own `group`/`macs`/`gflops`/regularity fields stay available in the harness's own report, not in the census CSV |
+| `print_environment()` prints human-readable lines | `tcbench/report.rs:81-100+` | add `key=value` lines for the provider/vendor identity and the thread readback, keeping the environment text as extra lines |
+| `verify` prints per-case `OK` lines | `tcbench/engines/verify.rs` | add the `all comparisons within tolerance` line and the census CSV |
+
+The census equality check compares `m`, `n`, `k` as the declaration implies them, so a case whose extents
+are not a matrix (an MPS chain) is declared with a **sentinel numeric shape** and the harness reports that
+sentinel back; the real extents stay in the corpus and in the harness's own output. That is the documented
+fidelity cost of riding the shared system, and the page has to say the case is a program rather than a
+matrix of that size.
+
 ## The extension: `cases` beside `populations`
 
 A suite may declare its workload as cases instead of populations. Nothing else in the contract moves:
