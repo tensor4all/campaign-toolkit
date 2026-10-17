@@ -102,6 +102,26 @@ The instance schema is already portable and small - this is one real file from
 exactly the duplicated reporting the toolkit exists to remove.
 
 
+## Concrete integration contract: `tcbench` (implemented 2026-10-17)
+
+**Status: the harness side is done and merged** — `tcontract-rs` main `953a2ff9` (PR #127,
+"tcbench: the timing-v2 evidence contract (admission-checked, additive)"), CI green, `cargo fmt` /
+`clippy -D warnings` / `cargo test -p tcontract-bench` clean, and validated against the toolkit's own
+`timing_evidence.validate` on a synthetic manifest. Three deviations from the table below are
+deliberate and worth keeping in mind when the campaign is migrated:
+
+- the identity columns (`m`,`n`,`k`) carry the **declared** spec once `--n` is given, and the resolved
+  extents are preserved in the appended `case_m,case_n,case_k` columns; without `--n` the identity
+  columns keep the resolved extents they had before, so an old-style invocation is unchanged;
+- the timed CSV also emits **skipped census cells** (with the census note and an empty `samples_ms`),
+  because the evidence check compares the timed cell set against both `ok` and `skipped` cells;
+- `verify --csv` writes the census as well, because the recorder passes `--csv` to `verify` and lists
+  those files as the run's verification census.
+
+The campaign migration is the remaining work: a generator that turns the committed corpus into a
+grid-shaped suite (case id in `family`, the case's group/dtype/final-step extents as data), the
+descriptor, the pin to `953a2ff9`, then the records and pages.
+
 ## Concrete integration contract: `tcbench` today (surveyed 2026-10-17)
 
 `tcontract-rs` at the campaign's pin `8abfa38` carries the harness as plain modules beside a `main.rs`
