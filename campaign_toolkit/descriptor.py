@@ -203,10 +203,21 @@ class Descriptor:
         return tuple(self.data.get("vendor_providers", []))
 
     @property
+    def external_providers(self) -> tuple:
+        """Providers that are neither the measured library nor a vendor: a separately built baseline.
+
+        A campaign that records one declares the names here, so the recorder can tell an engine row
+        measured from the checkout apart from an external baseline whose revision is collected
+        elsewhere, and can refuse to publish the latter without one.
+        """
+        return tuple(self.data.get("external_providers", []))
+
+    @property
     def measured_providers(self) -> tuple:
         seen = []
         for provider in self.engines.values():
-            if provider not in self.vendor_providers and provider not in seen:
+            if (provider not in self.vendor_providers and provider not in self.external_providers
+                    and provider not in seen):
                 seen.append(provider)
         return tuple(seen)
 

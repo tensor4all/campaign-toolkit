@@ -25,8 +25,9 @@ root, validated against `schemas/campaign.schema.json`. It declares the measured
 project (name, url, pin file, checkout, build script, binary, the feature per
 vendor arm), which revisions a run records (`identities: [library]` or
 `[library, upstream]`), the profiles/suites/data/result directories, the engine
-name -> provider map, the vendor providers, the published-page name template, the
-default invalidated paths, the CSV columns (and, for a campaign whose harness measures
+name -> provider map, the vendor providers (mutually exclusive BLAS/LAPACK arms) and the
+external providers (a baseline linked against a separately built library), the published-page
+name template, the default invalidated paths, the CSV columns (and, for a campaign whose harness measures
 one, the extra `case_axes` that identify a cell and the `case_label` a report and a
 comparison print it as), and the strings the index and report headers print. The package
 itself holds no campaign's specifics.
@@ -50,6 +51,18 @@ Console entry points (`campaign-record-run`, `campaign-validate-run`,
 `campaign-report-run`, `campaign-descriptor`,
 `campaign-validate-declarations`, `campaign-union-index`) are declared in
 `pyproject.toml`.
+
+## Recording a run
+
+A campaign records a run through `record_run` (its `scripts/record_run.py` shim). A suite that
+declares no vendor engine is recorded without a vendor selection, and its manifest omits the
+`vendor` block entirely (absence, not null). A suite that measures an engine whose provider is
+neither the measured library nor a vendor library is refused unless
+`--external-provider-json PATH` supplies that provider's collected identity with a non-empty
+`commit`: nothing is published from an arm whose revision cannot be stated. The entries are a JSON
+list of `{name, version, commit, path, note, tag, sha256}`, merged into the manifest's `providers`
+and printed on the page's provenance section independently of Cargo-dependency provenance, so an
+external baseline's revision is visible even when it is not a Cargo dependency.
 
 ## Hardware profiles
 

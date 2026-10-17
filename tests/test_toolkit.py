@@ -135,6 +135,116 @@ class FixtureCampaignTest(unittest.TestCase):
             self.assertEqual('gen_index' in modules, not no_publish)
             self.assertEqual('publish_report' in modules, not no_publish)
 
+    def _record(self, suite_id, label, source_csv, extra=(), identity=None, external_json=None):
+        """Record one run through the recorder with the build and measurement side mocked.
+
+        The content path is exercised for real: `validate_run` runs in-process, so a manifest the
+        recorder writes is checked by the same code CI checks it with.
+        """
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+
+        def process(args, **kwargs):
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            elif 'campaign_toolkit.report_run' in args:
+                (pathlib.Path(args[args.index('--run-dir') + 1])
+                 / 'report.md').write_text('placeholder\n')
+            return subprocess.CompletedProcess(args, 0,
+                                               stdout='all comparisons within tolerance', stderr='')
+
+        def child(module, args, **kwargs):
+            if module == 'validate_run':
+                errors = validate_run.validate(args[0])
+                return subprocess.CompletedProcess(args, 1 if errors else 0,
+                                                   stdout='\n'.join(errors), stderr='')
+            return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+
+        argv = ['fixture-cpu', suite_id, '--threads', '1', '--label', label, '--no-publish', *extra]
+        if external_json is not None:
+            argv += ['--external-provider-json', str(external_json)]
+        with (mock.patch.object(record_run, 'build', return_value=pin),
+              mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
+                                original['library']['commit'] if a[0] == 'rev-parse' else ''),
+              mock.patch.object(record_run, 'protocol_script',
+                                return_value=descriptor.current().profiles_file),
+              mock.patch.object(record_run, 'vendor_identity', return_value=identity or {}),
+              mock.patch.object(record_run, 'host_info', return_value=original['host']),
+              mock.patch.object(record_run.subprocess, 'run', side_effect=process),
+              mock.patch.object(descriptor, 'run_module', side_effect=child)):
+            self.assertEqual(record_run.main(argv, root=self.root), 0)
+        runs = sorted((self.root / 'data/results/fixture-cpu' / suite_id).glob(f'*-{label}'))
+        self.assertEqual(len(runs), 1, f'expected one {label} run under {suite_id}')
+        return runs[0]
+
+    def _external_source_csv(self):
+        source = self.root / 'external-source.csv'
+        source.write_text(
+            "regime,family,dtype,m,n,batch,row,threads,total_ms,per_item_us,status,note\n"
+            "small,mul,f64,4,4,1,algo-lane,1,0.4000,1.0000,ok,\n"
+            "small,mul,f64,4,4,1,ext-baseline,1,0.5000,1.0000,ok,\n")
+        return source
+
+    def test_vendorless_run_records_the_external_identity_and_omits_vendor(self):
+        run_dir = self._record(
+            'fixture-external', 'ext', self._external_source_csv(),
+            external_json=self.root / 'pins/external-providers.json')
+        manifest = campaign.load(run_dir / 'run.yaml')
+        # A suite with no vendor engine records no vendor identity at all: absence, not null.
+        self.assertNotIn('vendor', manifest)
+        self.assertEqual(manifest['run_spec']['engines'], ['algo-lane', 'ext-baseline'])
+        providers = {p['name']: p for p in manifest['providers']}
+        self.assertEqual(providers['algo']['note'],
+                         'the provider in the measured revision; see library above')
+        self.assertEqual(providers['tblis']['commit'],
+                         '3f2a1c0b9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f40')
+        self.assertEqual(providers['tblis']['tag'], 'v1.4.0')
+        self.assertEqual(providers['tblis']['sha256'],
+                         '9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b')
+        self.assertNotIn('the provider in the measured revision', providers['tblis']['note'])
+        # The report prints the external revision from the manifest, independently of Cargo deps.
+        self.assertEqual(report_run.main(['--run-dir', str(run_dir)], root=self.root), 0)
+        report = (run_dir / 'report.md').read_text()
+        self.assertIn('- external providers: `tblis` 1.4.0 @ `3f2a1c0b', report)
+        self.assertIn('tag `v1.4.0`', report)
+        self.assertIn('sha256 `9a8b7c6d5e4f3a2b', report)
+
+    def test_external_provider_admission_refuses_an_absent_or_empty_commit(self):
+        import json
+
+        source = self._external_source_csv()
+        # No collector output at all, a collector that omits the provider, and a provider entry
+        # that states no revision are the same refusal: nothing is published from an arm whose
+        # revision cannot be stated.
+        with self.assertRaisesRegex(SystemExit, "external provider\\(s\\) 'tblis'"):
+            self._record('fixture-external', 'nojson', source)
+        empty = self.root / 'empty-providers.json'
+        empty.write_text('[]')
+        with self.assertRaisesRegex(SystemExit, 'revision cannot be stated'):
+            self._record('fixture-external', 'empty', source, external_json=empty)
+        blank = self.root / 'blank-providers.json'
+        blank.write_text(json.dumps([{'name': 'tblis', 'version': None, 'commit': '',
+                                      'path': None, 'note': None}]))
+        with self.assertRaisesRegex(SystemExit, 'revision cannot be stated'):
+            self._record('fixture-external', 'blank', source, external_json=blank)
+
+    def test_vendor_backed_fixture_still_records_validates_and_reports(self):
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source = self.root / RUN_A_REL / original['result_files'][0]
+        run_dir = self._record('fixture-kernels', 'vendor', source,
+                               extra=['--vendor', 'openblas'],
+                               identity={'vendor.name': 'openblas', 'vendor.linkage': 'static',
+                                         'vendor.version': '0.3.99'})
+        manifest = campaign.load(run_dir / 'run.yaml')
+        self.assertEqual(manifest['vendor']['name'], 'openblas')
+        self.assertTrue(any(p['name'] == 'openblas' for p in manifest['providers']))
+        self.assertTrue(all('tag' not in p for p in manifest['providers']))
+        self.assertEqual(report_run.main(['--run-dir', str(run_dir)], root=self.root), 0)
+        self.assertNotIn('- external providers:', (run_dir / 'report.md').read_text())
+
     def test_observer_affinity_must_miss_the_measured_l3_domain(self):
         # CPU 7 is not measured when the cell runs on CPU 4, but it shares the cache: the observer
         # must be refused there too.

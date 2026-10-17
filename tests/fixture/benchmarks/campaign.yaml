@@ -29,8 +29,14 @@ engines:
   algo-lane: algo
   algo-pool: algo
   blas-openblas: openblas
+  ext-baseline: tblis
 
 vendor_providers: [openblas]
+
+# A baseline linked against a library built outside the measured checkout: its revision is not
+# the measured revision's, so the recorder records the collector's identity (or refuses the run)
+# instead of manufacturing it from the measured revision.
+external_providers: [tblis]
 
 page_name: "{library12}{version}{vendor}{dirty}"
 

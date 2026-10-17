@@ -252,6 +252,15 @@
       },
       "uniqueItems": true
     },
+    "external_providers": {
+      "description": "Providers that are neither the measured library nor a vendor: a baseline linked against a separately built library (TBLIS, for example). A campaign that records one declares its provider names here so the recorder attributes its engine rows to a collected identity, and refuses the run when that identity -- at least a non-empty commit -- is not supplied.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
     "vendor_env": {
       "description": "Thread-budget and tuning variables that belong to a vendor library, removed from the measured process's environment.",
       "type": "array",

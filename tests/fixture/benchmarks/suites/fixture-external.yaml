@@ -1,0 +1,48 @@
+schema_version: 1
+id: fixture-external
+description: >-
+  A synthetic vendor-less suite: the measured provider's own row plus one external
+  baseline linked against a separately built library, with no BLAS/LAPACK vendor
+  arm. It exists to exercise the external-provider admission and provenance paths
+  without a real build.
+invalidated_by:
+  - crates/fixture/**
+stale_after: 5
+required_profiles: []
+optional_profiles:
+  - fixture-cpu
+
+family_groups:
+  core:
+    - mul
+
+workloads:
+  name: fixture external kernels
+  description: >-
+    Synthetic dense kernels including one external baseline, one call per case, so a
+    vendor-less result page can be produced without a measured library.
+  source: >-
+    Declared for the toolkit's self-test; no real provider backs it.
+  known_blind_spots:
+    - "Nothing here is a measurement; the fixture only exercises the tooling."
+
+engines_doc:
+  algo-lane:
+    provider: algo
+    summary: The measured provider on one sequential lane. The overhead baseline.
+    identity: the measured revision
+  ext-baseline:
+    provider: tblis
+    summary: The external baseline, one call per case, linked against a separately built library.
+    identity: the external provider revision recorded in this run's manifest
+
+runs:
+  - threads: [1]
+    cpu_sets: ["0"]
+    dtypes: [f64]
+    engines: [algo-lane, ext-baseline]
+    populations:
+      - regime: small
+        groups: [core]
+        n: ["4"]
+        batch: [1]

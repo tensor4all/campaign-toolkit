@@ -131,7 +131,7 @@
       }
     },
     "vendor": {
-      "description": "The BLAS/LAPACK library the measured provider was linked against, as the harness reported it from the vendor's own introspection. A measurement whose vendor cannot be named is not evidence, so `validate_run.py` refuses a manifest whose declared engines include a vendor arm and whose `vendor` is absent.",
+      "description": "The BLAS/LAPACK library the measured provider was linked against, as the harness reported it from the vendor's own introspection. A measurement whose vendor cannot be named is not evidence, so `validate_run.py` refuses a manifest whose declared engines include a vendor arm and whose `vendor` is absent. A run whose suite declares no vendor engine omits the property entirely rather than recording a null one; absence, not an empty identity.",
       "type": "object",
       "required": [
         "name",
@@ -409,6 +409,20 @@
               "string",
               "null"
             ]
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The release tag an external baseline was built from, when it was built from one. A commit and a tag together say which release the bytes came from; either alone says less."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Hash of the artifact linked for an external provider. It says which bytes were measured, which neither a commit nor a tag does for a built native library."
           }
         }
       }
