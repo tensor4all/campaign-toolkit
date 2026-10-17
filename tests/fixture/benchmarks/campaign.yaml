@@ -8,6 +8,7 @@ measured:
   extern_dir: extern/fixture-rs
   build_script: scripts/build_fixture_rev.sh
   binary: fixturebench
+  harness_args: ["--corpus", "fixture-instances"]
   features:
     openblas: fixture-bench/link-openblas
   provider_packages:
