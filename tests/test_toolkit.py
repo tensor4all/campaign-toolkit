@@ -160,7 +160,8 @@ class FixtureCampaignTest(unittest.TestCase):
               mock.patch.object(record_run, 'vendor_identity', return_value={'vendor.name': 'openblas'}),
               mock.patch.object(record_run, 'host_info', return_value=original['host']),
               mock.patch.object(record_run.subprocess, 'run', side_effect=process),
-              mock.patch.object(descriptor, 'run_module', return_value=0)):
+              mock.patch.object(descriptor, 'run_module',
+                                side_effect=lambda *a, **k: subprocess.CompletedProcess([], 0, stdout='', stderr=''))):
             code = record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1', '--no-publish'],
                                    root=self.root)
         self.assertEqual(code, 0)
