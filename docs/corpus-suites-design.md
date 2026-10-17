@@ -1,8 +1,68 @@
 # Corpus suites: a short design for tcontract, cpueinsum and the org's other corpus campaigns
 
-Status: **proposal, not implemented.** Needs a decision because it changes the suite grammar; the
-review rule for this kind of change is a short design plus an independent pre-review before the
-implementation lands.
+## Revised plan (what to do instead)
+
+**Try a thin generated-population adapter before adding a workload grammar.** A corpus campaign keeps
+its executable corpus where it already lives (the measured checkout's `corpus.rs`), and a campaign-side
+generator writes a *grid-shaped* suite from it:
+
+- the immutable case identity **including the selected path/size variant** goes into the `family` slot,
+  because the census's declaration comparison strips `note` - a variant that lives only in `note` can
+  disappear from the declared grid without the evidence noticing;
+- shapes are emitted as explicit one/two/three-dimension triples where the corpus has genuine matrix
+  geometry (and a square `gemm` case keeps its `m x m x m` triple, because the toolkit derives `k = m`
+  for that family);
+- a whole-program case (the MPS chain: 65 inputs, 64 steps, one timed call) has no equivalent matrix
+  shape, so it is emitted with a documented opaque/sentinel shape - the page then says the case is a
+  program, not a matrix, and the definition stays in the corpus identified by the recorded revision;
+- the adapter emits the toolkit's CSV and census and reuses `report_run`/publication; it does **not**
+  keep its own Markdown reporting.
+
+**Admission stays fail-closed**: a requested engine whose build feature is missing (TBLIS) is a
+build/admission failure, not an automatic `skipped` row - otherwise a page could claim full coverage
+with no independent reference. Only a structurally unsupported case is a declared skip.
+
+**Provenance**: reuse the existing `engines`/`providers` mapping and the campaigns' own TBLIS
+collector (tag, commit, bundled BLIS revision, artifact hash); do not add a second engine taxonomy, and
+make the provider schema accept the fields the collector already records.
+
+**What this costs, honestly**: the adapter work is small, but every corpus campaign also needs its
+harness to speak the v2 contract first (chronological samples, census/status columns, `key=value`
+`info`). `tcbench`/`lukbench` today keep best/worst only, print a human-readable `info` and write their
+own seconds/GFLOP/s CSV; cpueinsum needs a new harness on top of that (instance loader, path
+conversion, reference adapter, verification). No delivery estimate is claimed until those contracts are
+settled.
+
+**Fallback if the sentinel-shape compromise is unacceptable**: implement only a *small opaque-case
+census extension* - declared case identities and variants, with the executable definition still owned
+by the campaign - rather than a generic tensor-program grammar in the toolkit.
+
+### What the pre-review found (blockers that shaped the revision)
+
+1. **The proposed `cases:` record does not describe the real workload.** `per-shape` fixes each case's
+   dtype (the harness filters by it), has three-input/two-step cases and 65-input/64-step MPS chains
+   whose CSV dimensions are the *final* step's, and `tcbench` resolves its extents from a 16 MiB suite
+   knob against a 200 MiB harness default with rank-dependent rounding. A case list works as a census
+   of opaque identities, not as their definition.
+2. **"The fail-closed checks work unchanged" was false.** The declaration comparison strips `note`, so
+   declared *paths* represented only as notes can vanish from both the census and the timing evidence
+   without failing; the identity contract must carry declared variants explicitly.
+3. The einsum mapping was underspecified (per-instance dtype, the column-major equation/shape pair, and
+   the SSA path with `num_inputs - 1` steps that `cpueinsum-rs` requires rather than an `opt_einsum`
+   shrink list).
+4. Changing the grammar touches the recorder, the suite and manifest schemas (which reject unknown
+   fields), coverage and publication, and `jsonschema_lite` supports no `oneOf` - and `per-shape`
+   declares a second runner (`lukbench`) that the descriptor's single `measured.binary` cannot select.
+5. TBLIS needs *external provenance*, not a new classification: a non-vendor provider is currently
+   attributed to the measured revision, `provider_packages` reads Cargo.lock (useless for a native
+   install), and the provider schema rejects the `tag`/`sha256` the campaign already records.
+
+### The proposal that was reviewed (kept as the record)
+
+Status: **revised after an independent pre-review (2026-10-17); nothing implemented.** The review
+rejected the grammar extension proposed below as the first move and named the two blockers that decide
+the shape of the real change. Read this section first: it is the plan; the original proposal is kept
+underneath as the record of what was rejected and why.
 
 ## What the current grammar covers, and what it cannot
 
