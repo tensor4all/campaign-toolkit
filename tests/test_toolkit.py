@@ -135,6 +135,42 @@ class FixtureCampaignTest(unittest.TestCase):
             self.assertEqual('gen_index' in modules, not no_publish)
             self.assertEqual('publish_report' in modules, not no_publish)
 
+    def test_harness_args_reach_run_and_verify_but_not_info(self):
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+        seen = []
+
+        def process(args, **kwargs):
+            seen.append(list(args))
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            elif 'campaign_toolkit.report_run' in args:
+                directory = pathlib.Path(args[args.index('--run-dir') + 1])
+                (directory / 'report.md').write_text('harness-args test report\n')
+            return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
+
+        with (mock.patch.object(record_run, 'build', return_value=pin),
+              mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
+                                original['library']['commit'] if a[0] == 'rev-parse' else ''),
+              mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
+              mock.patch.object(record_run, 'vendor_identity', return_value={'vendor.name': 'openblas'}),
+              mock.patch.object(record_run, 'host_info', return_value=original['host']),
+              mock.patch.object(record_run.subprocess, 'run', side_effect=process),
+              mock.patch.object(descriptor, 'run_module', return_value=0)):
+            code = record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1', '--no-publish'],
+                                   root=self.root)
+        self.assertEqual(code, 0)
+        harness = [a for a in seen if '--' in a and a[a.index('--') + 1].endswith('fixturebench')]
+        self.assertTrue(harness, 'the recorder never invoked the measured binary')
+        for argv in harness:
+            self.assertIn(argv[argv.index('--') + 2], ('verify', 'run'))
+            self.assertIn('--corpus', argv)
+            self.assertIn('fixture-instances', argv)
+
     def _record(self, suite_id, label, source_csv, extra=(), identity=None, external_json=None):
         """Record one run through the recorder with the build and measurement side mocked.
 
