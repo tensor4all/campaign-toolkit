@@ -240,16 +240,19 @@ unknown options and unavailable engines. Its inputs are the corpus's instance JS
 (`name`, `format_string`, `shapes`, `dtype`, `paths` with the chosen contraction order), so the loader
 is part of the harness, not of the toolkit.
 
-**Corpus: the one decision left.** Two candidate instance sets exist in the org, and they are not the
-same artifact:
+**Corpus: settled by evidence, not by preference.** A survey of the candidates resolved the question the
+earlier draft left open:
 
-| candidate | state | notes |
+| candidate | what it actually holds | verdict |
 | --- | --- | --- |
-| `tenferro-einsum-benchmark` | 168 instances, 7 categories, portable JSON, `data/` + `src/` + `scripts/` | the set the earlier discussion assumed; metadata only, tensors generated at run time |
-| `strided-rs-benchmark-suite` / `tenferro-benchmark` | newer (touched 2026-10-16/17), Julia-style `Project.toml` + `Manifest.toml`, submodules | appears to be the current umbrella suite; would need its own survey before use |
+| `tenferro-einsum-benchmark` | `data/instances/*.json`, one file per problem, each `{name, format_string, shapes, dtype, num_tensors, paths:{opt_size,opt_flops:{path, log2_size, log10_flops}}, format_string_colmajor, shapes_colmajor}`, plus a Rust runner and Python runners | **the einsum instance corpus**: the only einsum-shaped one in the org, and the portable metadata is exactly the declared identity a suite needs |
+| `strided-rs-benchmark-suite` | `benchmarks/strided_benchmarks/{dense_kernels,erased_replay,fused_elementwise,...}` | kernels and replay benchmarks, not an einsum instance corpus; a different measurement domain |
+| `tenferro-benchmark` | `benchmarks/`, `cpp/`, one submodule (`extern/TensorNetworkBenchmarks`, a C++ tensor-network benchmark) | an umbrella repository; it does not carry the einsum instances |
 
-Choosing between them is a user decision, not a technical one: it decides which numbers are comparable
-with what the rest of the org already publishes. This section deliberately does not pick.
+So the loader reads `tenferro-einsum-benchmark`'s instance JSONs at a pinned revision. The corpus's two
+declared contraction orders (`paths.opt_size` and `paths.opt_flops`) are the natural pair of engine rows,
+because the crate's whole subject is a caller-supplied order: the comparison the campaign publishes is
+what the two orders cost in one binary, with no external library needed for the first record.
 
 **Campaign.** `cpueinsum-rs` has no campaign repository yet; the shape is the one `tlinalg-benchmark`
 uses (descriptor per harness, `pins/`, the `scripts/v2/` shims, `data/v2-results/` and `result-v2/`
