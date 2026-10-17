@@ -101,6 +101,35 @@ The instance schema is already portable and small - this is one real file from
 `engines/` directory (`blas.rs`, `blas.rs`, `tblis.rs`, `ttgt.rs`) and their own `report.rs`, which is
 exactly the duplicated reporting the toolkit exists to remove.
 
+
+## Concrete integration contract: `tcbench` today (surveyed 2026-10-17)
+
+`tcontract-rs` at the campaign's pin `8abfa38` carries the harness as plain modules beside a `main.rs`
+(`benchmarks/benchmarks/tcbench/{main.rs,corpus.rs,report.rs,tblis.rs,ttgt.rs,engines/}`). Its CLI is
+`tcbench <run|verify|info>` with `--threads`, `--size <MiB>` (default 200), `--reps` (5), `--prime-ms`
+(1500, already time-based), `--dtype`, `--case <substr>`, `--engines plan,packed,ttgt,tblis`, `--csv`,
+`--stress`. This table is what the next implementation needs; nothing here is done yet.
+
+| the toolkit sends | `tcbench` today | decision for the adapter + harness |
+| --- | --- | --- |
+| `--threads N` | ✓ same flag, enforced host budget (`BenchThreads`) | as is |
+| `--n LIST` | ✗ only `--size <MiB>`; the corpus resolves extents from that knob | the suite declares the *size spec* in `n` (e.g. `16`) and the harness accepts `--n` as that spec, resolving it through the existing corpus sizing; the harness's own default (200 MiB) stays its default when the flag is absent |
+| `--batch LIST` | ✗ unit batch | accept it and require `1` (the corpus has unit batch) |
+| `--family LIST` | ✗ only `--case <substr>` | `--family` is the list of **case ids** (exact match), because the case identity has to be in `family` for the census; `--case` stays as the diagnostic substring filter |
+| `--regime R` | ✗ | accept it; it is the CSV/census label |
+| `--rows LIST` | ✗ engine rows are `plan,packed,ttgt,tblis` | accept it, filter to those rows and order them as given |
+| `--rotate-rows K` | ✗ | accept it; rotate the declared rows per process start (the v2 census and report depend on it) |
+| `--statistic best\|median` | ✗ best/worst only, no chronological samples | keep every call, report best or median of them |
+| `verify --csv PATH` census | ✗ `--csv` exists only for `run`, and the CSV is seconds/GFLOP/s with diagnostics | write the census: one row per declared cell with `status`/`note`, including declared skips, and the same rotation the run uses |
+| `info` | prints a human-readable environment | add the recorder's `key=value` contract (provider/vendor identity, thread readback), keeping the environment text as extra lines |
+| `--dtype` | ✓ same flag (f32,f64,c32,c64) | as is; the campaign's dtypes decide the grid |
+| verification success line | prints per-case `OK` lines | add the `all comparisons within tolerance` line the recorder requires |
+
+Two policy points from the pre-review are part of this contract: a case whose dtype the corpus fixes is
+*filtered* by dtype rather than multiplied into it (the harness already filters), and a requested engine
+whose build feature is missing (`tblis`) is an **admission failure**, not a `skipped` row, because
+`tcbench` itself rejects that configuration today.
+
 ## The extension: `cases` beside `populations`
 
 A suite may declare its workload as cases instead of populations. Nothing else in the contract moves:
