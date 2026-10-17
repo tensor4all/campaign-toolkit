@@ -222,3 +222,42 @@ leaves the duplicated reporting that the migration just deleted in `tlinalg`.
   the frozen timing settings; provenance (library, upstream, harness, toolkit, binary SHA, host block).
 - Historical pages: a corpus grammar adds a new declaration shape, it does not reinterpret an existing
   one, and a revised contract still gets a new `-timing-vN` page name.
+
+## cpueinsum: the plan (surveyed 2026-10-17, nothing implemented)
+
+The tcontract migration settled the route this section has to follow: a corpus campaign keeps its
+executable corpus where it lives, the campaign-side generator turns the pinned corpus into a
+grid-shaped declaration, and the harness speaks the v2 contract. `cpueinsum-rs` ("CPU einsum over
+integer labels with a caller-supplied contraction order, on tcontract") has **no harness at all** yet,
+so its workstream is harness-first.
+
+**Harness (in `cpueinsum-rs`).** A `cpueinsum-bench` binary carrying the same contract as
+`tcbench`/`lukbench`: `--regime/--n/--family/--batch/--rows/--rotate-rows/--statistic/--census-csv`,
+chronological samples, the evidence columns (declared identity in `m,n,k`, resolved extents in
+`case_m/case_n/case_k`), one row per declared cell including declared skips, `verify` writing the census
+and printing `all comparisons within tolerance`, `key=value` `info` lines, and fail-closed refusal of
+unknown options and unavailable engines. Its inputs are the corpus's instance JSONs
+(`name`, `format_string`, `shapes`, `dtype`, `paths` with the chosen contraction order), so the loader
+is part of the harness, not of the toolkit.
+
+**Corpus: the one decision left.** Two candidate instance sets exist in the org, and they are not the
+same artifact:
+
+| candidate | state | notes |
+| --- | --- | --- |
+| `tenferro-einsum-benchmark` | 168 instances, 7 categories, portable JSON, `data/` + `src/` + `scripts/` | the set the earlier discussion assumed; metadata only, tensors generated at run time |
+| `strided-rs-benchmark-suite` / `tenferro-benchmark` | newer (touched 2026-10-16/17), Julia-style `Project.toml` + `Manifest.toml`, submodules | appears to be the current umbrella suite; would need its own survey before use |
+
+Choosing between them is a user decision, not a technical one: it decides which numbers are comparable
+with what the rest of the org already publishes. This section deliberately does not pick.
+
+**Campaign.** `cpueinsum-rs` has no campaign repository yet; the shape is the one `tlinalg-benchmark`
+uses (descriptor per harness, `pins/`, the `scripts/v2/` shims, `data/v2-results/` and `result-v2/`
+trees, frozen timing policy), with the reference engine row declared as an external provider if it is a
+separately built library (the toolkit now supports that path, including a vendor-less campaign) and
+`sizes_mib`-style sizing avoided in favour of the per-instance declared identity plus the numeric
+sentinel for cases that are whole programs.
+
+**Prerequisites already in place** (from the tcontract migration): vendor-less recording, external
+provider ingestion with `tag`/`sha256`, suite `features` / campaign `loader_paths`, and the harness
+contract itself, which the two tcontract harnesses now demonstrate in the measured repository.
