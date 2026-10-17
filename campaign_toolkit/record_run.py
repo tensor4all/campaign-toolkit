@@ -210,7 +210,23 @@ def toolkit_identity(root):
             'measured_path': str(root)}
 
 
-def build(checkout, vendor, upstream=None):
+def build_features(suite, arm, d):
+    """The cargo feature list the build is invoked with.
+
+    A suite's `features` is the campaign's own declaration of the features the harness is built
+    with, so it is exported verbatim. A descriptor's `measured.features` names one feature per
+    vendor arm; the selected arm's entry is appended, because a vendor-selected build needs it.
+    When neither is declared the list is empty, which the recorder exports as an empty
+    `BENCH_FEATURES`.
+    """
+    features = list(suite.get("features", []))
+    per_arm = (d.measured.get("features") or {}).get(arm) if arm else None
+    if per_arm and per_arm not in features:
+        features.append(per_arm)
+    return features
+
+
+def build(checkout, vendor, upstream=None, features=()):
     d = descriptor.current()
     env_file = d.root / "target" / f"pin-{vendor or 'none'}.env"
     env_file.parent.mkdir(parents=True, exist_ok=True)
@@ -225,7 +241,7 @@ def build(checkout, vendor, upstream=None):
         "vendor": vendor or "",
     }
     sh([token.format(**tokens) for token in template],
-       env=dict(os.environ, BENCH_VENDOR=vendor or ""))
+       env=dict(os.environ, BENCH_VENDOR=vendor or "", BENCH_FEATURES=",".join(features)))
     pin = {}
     for line in env_file.read_text().splitlines():
         if "=" not in line:
@@ -595,7 +611,7 @@ def main(argv=None, root=None):
 
     checkout = pathlib.Path(args.checkout)
     upstream = pathlib.Path(args.upstream) if d.has_upstream else None
-    pin = build(checkout, arm, upstream)
+    pin = build(checkout, arm, upstream, build_features(suite, arm, d))
     rev, dirty = pin[pin_env["rev"]], pin[pin_env["dirty"]] == "true"
     if v2 and (dirty or (d.has_upstream and pin[d.upstream['pin_env']['dirty']] == 'true')):
         sys.exit('ERROR: v2 requires clean committed library checkouts')
@@ -644,6 +660,13 @@ def main(argv=None, root=None):
     for variable in d.vendor_env:
         env.pop(variable, None)
     env.setdefault("CARGO_BUILD_JOBS", str(max(1, (os.cpu_count() or 4) // 4)))
+    # A library the harness loads but was not built into the measured checkout needs its
+    # directory on the loader path. The directories are the campaign's declaration, expanded
+    # from the environment; whatever `LD_LIBRARY_PATH` the recorder inherited is kept after them.
+    loader_paths = [os.path.expandvars(path) for path in d.loader_paths]
+    if loader_paths:
+        inherited = env.get("LD_LIBRARY_PATH")
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(loader_paths + ([inherited] if inherited else []))
 
     # What the harness reports it linked decides the manifest, not what was asked for: the arm
     # and the binary have to agree, or the run is not recorded at all.

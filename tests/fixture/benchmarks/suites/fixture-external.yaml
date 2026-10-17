@@ -11,6 +11,8 @@ stale_after: 5
 required_profiles: []
 optional_profiles:
   - fixture-cpu
+features:
+  - fixture-bench/link-tblis
 
 family_groups:
   core:
