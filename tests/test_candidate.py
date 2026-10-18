@@ -91,6 +91,35 @@ class CandidateTest(unittest.TestCase):
         self.assertFalse(ok, 'a control row 50% off must refuse the comparison')
         self.assertTrue(rows[0]['outside_baseline_range'])
 
+    def test_the_control_gate_is_the_median_not_every_cell(self):
+        # A cell-by-cell rule refuses every candidate: two runs of the same revision already fail it
+        # 1/396 and 12/396, and the unchanged row moves with the linked binary. The median is the
+        # machine-state signal; the tail is reported, not used to refuse.
+        cells = (('lu', 'f64', ''), ('gemm', 'f64', ''), ('qr', 'f64', ''))
+        baseline = make_run(self.root, 'baseline', cells=cells)
+        shifted = make_run(self.root, 'shifted', library='candidate', cells=cells)
+        path = shifted / 'run0-s-1t.csv'
+        rows = list(csv.DictReader(path.open()))
+        for row in rows:
+            if row['row'] == 'faer-upstream' and row['family'] == 'gemm':
+                row['samples_ms'] = json.dumps([5.0, 5.0])
+        with path.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+        ok, compared = candidate.control_check(baseline, shifted, 'faer-upstream')
+        self.assertTrue(ok, 'the median reproduces the baseline; one moved cell must not refuse')
+        self.assertTrue(any(row['outside_baseline_range'] for row in compared),
+                        'the moved cell is still reported, it just does not decide')
+
+    def test_a_uniform_control_shift_beyond_two_percent_refuses(self):
+        baseline = make_run(self.root, 'baseline')
+        near = make_run(self.root, 'near', control_ms=20.3)
+        self.assertTrue(candidate.control_check(baseline, near, 'faer-upstream')[0])
+        far = make_run(self.root, 'far', control_ms=21.0)
+        self.assertFalse(candidate.control_check(baseline, far, 'faer-upstream')[0],
+                         'a 5% global shift is a moved machine')
+
     def test_unlisted_rejected_csv_cannot_change_candidate_samples(self):
         baseline = make_run(self.root, 'baseline')
         before = candidate.series(baseline, 'faer-fork', 2)

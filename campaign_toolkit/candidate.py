@@ -189,17 +189,30 @@ def _paired_series(baseline_run, candidate_run, engine, cells=None):
     return sorted(base_timed), base_timed, cand_timed
 
 
-def control_check(baseline_run, candidate_run, engine, cells=None):
-    """Compare the unchanged row between the two runs, cell by cell.
+def control_check(baseline_run, candidate_run, engine, cells=None, median_tolerance=0.02):
+    """Compare the unchanged row between the two runs as a distribution, not cell by cell.
 
-    Returns (ok, rows) where rows holds the baseline median, the candidate median, the ratio and
-    whether the candidate left the baseline's recorded between-start range. The engine row is the
-    unchanged one the candidate binary still carries, so a moved machine shows up here before any
-    fork number is read. Raises ValueError when the two runs cannot be paired.
+    Returns (ok, rows). `ok` is the machine-state decision: the median of the per-cell
+    candidate/baseline ratios of the *unchanged* row must be within `median_tolerance` of 1, the
+    rule the protocol already states. `rows` keeps every cell's baseline median, candidate median,
+    ratio, baseline between-start range and whether the cell left that range, so a caller can report
+    the tail - but the tail does not refuse the comparison.
+
+    Why not per cell: the unchanged row moves with the *linked binary* even when its source is
+    identical, because the two runs compile different trees and the layout and allocation sites of
+    the harness move with them. On a quiet host, saved pairs of one source show per-cell ratios
+    spanning 0.74-1.36 and up to 8% of cells outside +-10%, while their medians sit within 0.2% of
+    1; two runs of the *same* revision already fail a per-cell rule 1/396 and 12/396. A per-cell
+    all-or-nothing gate therefore refuses every candidate, including pairs whose only difference is
+    the build, and would report a binary-layout effect as a moved machine.
+
+    The engine row is the unchanged one the candidate binary still carries, so a machine that
+    shifted globally moves the median before any fork number is read. Raises ValueError when the two
+    runs cannot be paired.
     """
     keys, baseline_series, candidate_series = _paired_series(baseline_run, candidate_run, engine,
                                                              cells)
-    rows, ok = [], True
+    rows = []
     for key in keys:
         base = baseline_series[key]
         cand = candidate_series[key]
@@ -209,8 +222,10 @@ def control_check(baseline_run, candidate_run, engine, cells=None):
         rows.append({'cell': key, 'baseline_ms': base_median, 'candidate_ms': cand_median,
                      'ratio': cand_median / base_median, 'baseline_range_ms': (low, high),
                      'outside_baseline_range': outside})
-        ok = ok and not outside
-    return ok, rows
+    if not rows:
+        return True, rows
+    median_ratio = statistics.median(row['ratio'] for row in rows)
+    return abs(median_ratio - 1.0) <= median_tolerance, rows
 
 
 def fork_comparison(baseline_run, candidate_run, fork_engine, cells=None):
