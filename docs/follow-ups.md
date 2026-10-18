@@ -15,20 +15,23 @@ others, so it is not a structural disagreement of the two paths). The declaratio
 
 - Evidence: `cpueinsum-benchmark/docs/verify-refusal-str_mps-varying-inner-product-200.md`,
   plus `AGENTS.md`/`README.md`/`benchmarks/suites/*.yaml`/`scripts/gen_suite_from_census.py` there.
+- Tracked as **tensor4all/cpueinsum-rs#30**.
 - Next: root-cause it in `cpueinsum-rs` (the corpus's own runner generates zero-filled tensors and never
   compared values, so its pipeline could not have seen this). Then delete the exclusion entry and let the
   generator re-declare all 14.
 
-## 2. Toolkit: the recorder cannot pass a harness *input path*
+## 2. Toolkit: the recorder cannot pass a harness *input path* — FIXED (2026-10-18)
 
 `cpueinsum-bench` requires `--instances DIR`, and the recorder's harness command line has no field for it.
 The campaign works around this with `scripts/harness_launcher.sh`, which adds the flag and is what
 `measured.binary` names - so `binary.sha256` is the launcher's, with the cargo artifact's hash one file
 away in `binary-info.txt`.
 
-- Evidence: `cpueinsum-benchmark/{AGENTS.md,README.md,benchmarks/campaign.yaml,scripts/*}`.
-- Next: add a first-class descriptor field (harness arguments or input paths) to the recorder, then retire
-  the launcher and record the built artifact's hash directly.
+- **Done:** the descriptor field `measured.harness_args` now exists (campaign-toolkit #23, with the test
+  fix in #24), the campaign declares `--instances <corpus>` there, `scripts/harness_launcher.sh` is
+  deleted, the build script installs the artifact itself, and the campaign was re-recorded (5m41s,
+  `coverage=full`) so `binary.sha256` is the artifact's own hash `08d31475…` - the same hash the launcher
+  used to report in `binary-info.txt`.
 
 ## 3. faer: a small-shape threshold guard for the adopted row-major work
 
@@ -36,6 +39,7 @@ The acceptance run for the adopted row-major QR/LU change found the 1T target ce
 improvements, 0 regressions) but **43 beyond-band regressions at 4T/8T, all small shapes** (e.g.
 `qr_factor 32x32` f64 at 1.83x). The change is merged; the follow-up is the guard.
 
+- Tracked as **tensor4all/faer#18**.
 - Evidence: `faer-benchmark/docs/reviews/20261016-acceptance-run.md` (the "next step" line), the run
   dirs it cites, and `faer-benchmark/docs/rules.md` for the acceptance protocol to re-run afterwards.
 - Next: add the shape threshold (or route small shapes to the previous path), then re-accept.
@@ -50,10 +54,11 @@ the batched behaviour of the expensive decompositions at tiny sizes.
 - Evidence: `tlinalg-benchmark/benchmarks/suites/tlinalg-kernels.yaml` (the trim comment and the
   updated blind spots) and `result/zen5-cpu/tlinalg-kernels/*-timing-v2.md`.
 
-## 5. tcbench and lukbench disagree about unknown options
+## 5. tcbench and lukbench disagree about unknown options — FIXED (2026-10-17)
 
 `lukbench` refuses an unknown option with exit 2; the merged `tcbench` still only warns and continues. The
 fail-closed rule says they should agree.
 
-- Evidence: `tcontract-rs` `benchmarks/benchmarks/{tcbench,lukbench}/main.rs`.
-- Next: make `tcbench` refuse, as a one-line behaviour change with its usage text updated.
+- **Done:** `tcontract-rs` #130 makes `tcbench` exit 2 with `unknown option …`, matching `lukbench`;
+  verified with fmt/clippy/tests and the binary itself. No evidence-format change, so recorded pages stay
+  valid.
