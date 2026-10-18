@@ -98,6 +98,28 @@ def observer_cpus(cpu_sets):
     return online_cpus() - domains
 
 
+def format_cpu_list(cpus):
+    """`[0,1,2,3,12,13]` -> `'0-3,12-13'`, the form the manifests and the refusal messages use."""
+    return ", ".join(f"{low}" if high == low else f"{low}-{high}"
+                     for low, high in ranges(sorted(cpus)))
+
+
+def observer_affinity(cpu_sets):
+    """The observing side's CPUs as a record, not only as a precondition.
+
+    `require_observer_off_measured_cpus` refuses an observer that overlaps the measured L3
+    domains, but a refusal leaves no trace in an admitted run: nothing in the manifest says which
+    CPUs the recorder actually ran on. The pin therefore lived only in the operator's shell, and a
+    restarted agent silently loses it. This returns both sets - the affinity this process was
+    recorded with, and the CPUs that were free of the measurement - so the manifest can state them
+    instead of assuming them. Neither list is hardcoded; both come from this host's topology.
+    """
+    free_cpus = observer_cpus(cpu_sets)
+    mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
+    return {"affinity": format_cpu_list(mine), "free_cpus": format_cpu_list(free_cpus),
+            "source": "os.sched_getaffinity(0) in the recording process"}
+
+
 def warn_if_measured_cpus_span_l3_domains(cpu_sets):
     """A measured set may span L3 domains; say so, because every touched domain must stay quiet.
 
@@ -584,6 +606,7 @@ def main(argv=None, root=None):
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
     warn_if_measured_cpus_span_l3_domains(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)
+    observer_record = observer_affinity(cpu_sets)
     require_boost_disabled()
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')
@@ -782,6 +805,7 @@ def main(argv=None, root=None):
         "threads": {
             "counts": threads,
             "cpu_sets": cpu_sets,
+            "observer": observer_record,
             "env": {k: os.environ.get(k) for k in d.vendor_env},
             "note": "the vendor's budget is set by the harness from the row's thread count and "
                     "read back before each measurement; these variables were removed from the "

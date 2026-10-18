@@ -411,6 +411,19 @@ class FixtureCampaignTest(unittest.TestCase):
                 record_run.warn_if_measured_cpus_span_l3_domains({'8': '0-7'})
                 self.assertIn('spans the L3 domains', loud.getvalue())           # warned, not refused
 
+    def test_observer_affinity_is_recorded_not_only_refused(self):
+        # A refusal that admitted a run leaves no trace of what the observer was pinned to; the
+        # record states both the process's own affinity and the CPUs free of the measurement.
+        with (mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}),
+              mock.patch.object(record_run, 'online_cpus',
+                                return_value={0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15}),
+              mock.patch.object(record_run.os, 'sched_getaffinity',
+                                return_value={0, 1, 2, 3, 12, 13, 14, 15})):
+            record = record_run.observer_affinity({'1': '4'})
+        self.assertEqual(record['affinity'], '0-3, 12-15')
+        self.assertEqual(record['free_cpus'], '0-3, 12-15')   # nothing outside the domain is left out
+        self.assertIn('sched_getaffinity', record['source'])
+
     def test_single_l3_domain_host_warns_instead_of_refusing(self):
         # A small CI runner has one L3 domain: nothing can be parked off the measured cache there,
         # so this is a recorded warning, while an observer that may land on a measured CPU still

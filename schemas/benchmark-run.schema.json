@@ -315,6 +315,26 @@
             "type": "string"
           }
         },
+        "observer": {
+          "type": "object",
+          "required": [
+            "affinity",
+            "free_cpus"
+          ],
+          "additionalProperties": false,
+          "description": "The observing side's CPUs as recorded, not assumed: `affinity` is the recording process's own sched_getaffinity, `free_cpus` the CPUs outside every measured L3 domain. Absent from manifests recorded before this field existed; the refusal that admitted those runs still applied.",
+          "properties": {
+            "affinity": {
+              "type": "string"
+            },
+            "free_cpus": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          }
+        },
         "env": {
           "type": "object",
           "additionalProperties": {
