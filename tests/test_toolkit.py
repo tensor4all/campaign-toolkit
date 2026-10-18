@@ -111,7 +111,9 @@ class FixtureCampaignTest(unittest.TestCase):
 
             def process(args, **kwargs):
                 if '--csv' in args:
-                    shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+                    csv_path = args[args.index('--csv') + 1]
+                    self.assertEqual(kwargs['env']['PINNED_CSV'], csv_path)
+                    shutil.copyfile(source_csv, csv_path)
                 elif 'campaign_toolkit.report_run' in args:
                     directory = pathlib.Path(args[args.index('--run-dir') + 1])
                     (directory / 'report.md').write_text('Synthetic failure-propagation test report.\n')

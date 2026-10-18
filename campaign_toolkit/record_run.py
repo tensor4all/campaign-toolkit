@@ -699,7 +699,8 @@ def main(argv=None, root=None):
                                 "--rows", ",".join(engines),
                                 *(['--regime', population['regime'], '--csv', str(run_dir / f'{stem}.csv')]
                                   if v2 else [])],
-                               env=env, capture_output=True, text=True)
+                               env={**env, 'PINNED_CSV': str(run_dir / f'{stem}.csv') if v2 else ''},
+                               capture_output=True, text=True)
             out.write_text(r.stdout)
             guard.write_text(r.stderr)
             guards.append(guard.name)
@@ -727,7 +728,8 @@ def main(argv=None, root=None):
                                     *(['--statistic', 'median', '--rotate-rows', str(rep % len(engines))]
                                       if v2 else []),
                                     "--csv", str(run_dir / f"{stem}.csv")],
-                                   env=env, capture_output=True, text=True)
+                                   env={**env, 'PINNED_CSV': str(run_dir / f'{stem}.csv')},
+                                   capture_output=True, text=True)
                 (run_dir / f"{stem}.guard").write_text(r.stderr)
                 guards.append(f"{stem}.guard")
                 if r.returncode != 0:

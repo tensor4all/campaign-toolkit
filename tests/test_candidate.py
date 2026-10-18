@@ -67,6 +67,16 @@ class CandidateTest(unittest.TestCase):
         self.assertFalse(ok, 'a control row 50% off must refuse the comparison')
         self.assertTrue(rows[0]['outside_baseline_range'])
 
+    def test_unlisted_rejected_csv_cannot_change_candidate_samples(self):
+        baseline = make_run(self.root, 'baseline')
+        before = candidate.series(baseline, 'faer-fork', 2)
+        rejected = make_run(self.root, 'rejected', fork_ms=1e9, control_ms=1e9)
+        archive = baseline / 'run0-s-1t.csv.rejected.fixture'
+        archive.mkdir()
+        (archive / 'result.csv').write_text((rejected / 'run0-s-1t.csv').read_text())
+        self.assertEqual(candidate.series(baseline, 'faer-fork', 2), before)
+        self.assertTrue(candidate.control_check(baseline, baseline, 'faer-upstream')[0])
+
     def test_fork_comparison_reports_the_rotation_averaged_ratio(self):
         baseline = make_run(self.root, 'baseline')
         faster = make_run(self.root, 'faster', library='candidate', fork_ms=5.0)
