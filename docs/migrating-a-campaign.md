@@ -18,6 +18,30 @@ Both sibling campaigns already declare suites in the shape the toolkit's suite s
 `workloads`, `runs[0].populations`), because they were written from the same template. What they lack is
 the descriptor, the toolkit pin, the v2 evidence contract and the measurement preconditions.
 
+## Status, 2026-10-19
+
+The table above was the state on 2026-10-16; three things have moved since.
+
+- **`tlinalg-benchmark` is migrated.** It has `benchmarks/campaign.yaml`, every script is a thin shim
+  over the toolkit, and its pin is on the shared revision. What it lacked was the adoption discipline:
+  its `docs/merge-procedure.md` now instantiates `docs/merge-procedure.md` here and its `AGENTS.md`
+  links it.
+- **`cpueinsum-benchmark` is migrated and has no runs yet.** Its two pin files moved together to the
+  revision that carries the median control gate and the ancestor pin check, so its first recording
+  starts from the current contract rather than from a stale one.
+- **`tcontract-benchmark` is still vendored**: `scripts/record_run.py` is a 380-line copy with no
+  `campaign_toolkit` import, so bumping its pin changes nothing and none of the shared behaviour
+  (control gate, observer record, pin check, refusal on an unverified grid) applies there. It is the
+  one campaign that still needs the migration, and it needs it before it can make any of the claims
+  the other two make.
+
+The work for `tcontract-benchmark`, in the order the gap matters: descriptor
+(`benchmarks/campaign.yaml` with `build_env: {BENCH_VENDOR: "{vendor}"}` for its vendor selection),
+shims in place of the copies, the pin, then a dry `record_run --no-publish` to exercise the build argv
+and the harness's v2 surface (`tcbench verify`/`run`), and only then a real run of the newest commit.
+Its harness lives in the measured repository, so the v2 CLI has to be extended there first; that is
+the same shape the guide's last section describes for `tlbench`.
+
 ## Steps per campaign
 
 1. **Descriptor** `benchmarks/campaign.yaml` (model: `faer-benchmark`): `measured` (name, url, pin file,
