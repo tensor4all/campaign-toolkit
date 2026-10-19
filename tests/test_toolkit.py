@@ -426,15 +426,15 @@ class FixtureCampaignTest(unittest.TestCase):
                 mock.patch.object(record_run.os, 'sched_getaffinity',
                                   return_value={0, 1, 2, 3, 12, 13, 14, 15}))
         with topo[0], topo[1], topo[2]:
-            agent = [{'pid': 4242, 'comm': 'node', 'affinity': set(range(24)), 'cpu_seconds': 5000.0}]
+            agent = [{'pid': 4242, 'comm': 'node', 'affinity': set(range(24)), 'cpu_fraction': 0.24}]
             with mock.patch.object(record_run, 'ancestor_processes', return_value=agent):
                 with self.assertRaisesRegex(SystemExit, 'observing side still overlaps'):
                     record_run.require_observer_off_measured_cpus({'1': '4'})
-            wrapper = [{'pid': 4243, 'comm': 'bash', 'affinity': set(range(24)), 'cpu_seconds': 0.01}]
-            with mock.patch.object(record_run, 'ancestor_processes', return_value=wrapper):
+            idle = [{'pid': 4243, 'comm': 'herdr', 'affinity': set(range(24)), 'cpu_fraction': 0.0}]
+            with mock.patch.object(record_run, 'ancestor_processes', return_value=idle):
                 record_run.require_observer_off_measured_cpus({'1': '4'})
             moved = [{'pid': 4244, 'comm': 'node', 'affinity': {0, 1, 2, 3, 12, 13, 14, 15},
-                      'cpu_seconds': 5000.0}]
+                      'cpu_fraction': 0.24}]
             with mock.patch.object(record_run, 'ancestor_processes', return_value=moved):
                 record_run.require_observer_off_measured_cpus({'1': '4'})
 

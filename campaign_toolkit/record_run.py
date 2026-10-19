@@ -34,6 +34,7 @@ import platform
 import shlex
 import subprocess
 import sys
+import time
 
 import yaml
 
@@ -139,11 +140,11 @@ def warn_if_measured_cpus_span_l3_domains(cpu_sets):
 
 
 
-# A process that has already burned this much CPU is a worker - an agent, an editor, a browser -
-# not a wrapper shell that will sit idle around the recorder. The recorder pins itself, but the
-# agent that launched it is a long-lived process of its own, its affinity is not inherited
-# backwards, and it keeps using the cores while every cell of a run is being timed.
-WORKER_CPU_SECONDS = 1.0
+# The observing side is judged on what it is *doing*, not on how long it has lived: a terminal
+# daemon that has been up for a week but idles is not the threat, the agent that keeps working
+# during the cells is. The sample is short, deterministic, and taken before the build.
+OBSERVER_SAMPLE_SECONDS = 0.5
+OBSERVER_BUSY_FRACTION = 0.01
 
 
 def _proc_field(pid, prefix):
@@ -172,24 +173,41 @@ def proc_cpu_seconds(pid):
         return None
 
 
-def ancestor_processes(pid=None):
-    """This process and its ancestors, with the affinity and CPU time each one carries.
-
-    The affinity lives in the process: pinning the recorder does nothing for the agent that
-    launched it, and the agent keeps running while the campaign times a cell. This is the chain the
-    check has to look at, not only `os.getpid()`.
-    """
+def ancestor_pids(pid=None):
+    """This process and its ancestors, nearest first."""
     out = []
     pid = os.getpid() if pid is None else pid
     seen = set()
     while pid and pid > 1 and pid not in seen:
         seen.add(pid)
-        out.append({"pid": pid, "comm": _proc_field(pid, "Name:") or "?",
-                    "affinity": proc_affinity(pid), "cpu_seconds": proc_cpu_seconds(pid)})
+        out.append(pid)
         try:
             pid = int(_proc_field(pid, "PPid:"))
         except (TypeError, ValueError):
             break
+    return out
+
+
+def ancestor_processes(pid=None, seconds=OBSERVER_SAMPLE_SECONDS, sleep=time.sleep):
+    """This process and its ancestors, with the affinity and the share of a core each one is using.
+
+    The affinity lives in the process: pinning the recorder does nothing for the agent that
+    launched it, and the agent keeps working while the campaign times a cell. This is the chain the
+    check has to look at, not only `os.getpid()`. The activity is sampled over `seconds`, so a
+    long-lived process that is idle during the measurement is not refused for its age.
+    """
+    pids = ancestor_pids(pid)
+    before = {p: proc_cpu_seconds(p) for p in pids}
+    if seconds:
+        sleep(seconds)
+    out = []
+    for p in pids:
+        after = proc_cpu_seconds(p)
+        rate = None
+        if before[p] is not None and after is not None and seconds:
+            rate = max(0.0, after - before[p]) / seconds
+        out.append({"pid": p, "comm": _proc_field(p, "Name:") or "?",
+                    "affinity": proc_affinity(p), "cpu_fraction": rate})
     return out
 
 
@@ -222,16 +240,17 @@ def require_observer_off_measured_cpus(cpu_sets):
     # not move it. A wrapper shell that exits or idles is harmless, so the rule names workers.
     workers = [entry for entry in ancestor_processes()
                if entry["affinity"] and entry["affinity"] & domains
-               and (entry["cpu_seconds"] or 0.0) >= WORKER_CPU_SECONDS]
+               and (entry["cpu_fraction"] or 0.0) >= OBSERVER_BUSY_FRACTION]
     if workers:
         free = format_cpu_list(free_cpus)
         lines = [f"ERROR: the observing side still overlaps the measured L3 domain(s) "
-                 f"{sorted(domains)}; these processes have used CPU and may run the recorder "
-                 f"during the measurement:"]
+                 f"{sorted(domains)}; these processes were using CPU during a "
+                 f"{OBSERVER_SAMPLE_SECONDS:g} s sample and may run the recorder during the "
+                 f"measurement:"]
         for entry in workers:
             lines.append(f"  pid {entry['pid']} ({entry['comm']}) affinity "
                          f"{format_cpu_list(entry['affinity'])}, "
-                         f"{entry['cpu_seconds']:.0f} s of CPU")
+                         f"{100 * entry['cpu_fraction']:.1f}% of a core")
         lines.append(f"Move them off it, then start the recorder unchanged: "
                      f"`taskset -pc {free} <pid>` for each; the recorder and its children inherit "
                      f"the corrected affinity when they are started after the move")
