@@ -66,6 +66,12 @@ class FixtureCampaignTest(unittest.TestCase):
                 text = path.read_text().replace("@COMMIT@", rev).replace("@SUITE_SHA@", sha)
                 path.write_text(text)
         descriptor.set_root(self.root)
+        # The fixture runs the recorder in-process, so the real test runner is one of its
+        # ancestors with the whole machine in its affinity. The ancestor check is exercised by its
+        # own test; here it is held at "nothing to see" so the fixture topology decides the flow.
+        patcher = mock.patch.object(record_run, 'ancestor_processes', return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -410,6 +416,27 @@ class FixtureCampaignTest(unittest.TestCase):
             with mock.patch('sys.stderr', new_callable=io.StringIO) as loud:
                 record_run.warn_if_measured_cpus_span_l3_domains({'8': '0-7'})
                 self.assertIn('spans the L3 domains', loud.getvalue())           # warned, not refused
+
+    def test_a_worker_ancestor_on_a_measured_cpu_refuses_before_the_build(self):
+        # Pinning the recorder does nothing for the agent that launched it: the agent is a separate
+        # long-lived process and keeps using the cores while the cells are timed.
+        topo = (mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}),
+                mock.patch.object(record_run, 'online_cpus',
+                                  return_value={0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15}),
+                mock.patch.object(record_run.os, 'sched_getaffinity',
+                                  return_value={0, 1, 2, 3, 12, 13, 14, 15}))
+        with topo[0], topo[1], topo[2]:
+            agent = [{'pid': 4242, 'comm': 'node', 'affinity': set(range(24)), 'cpu_seconds': 5000.0}]
+            with mock.patch.object(record_run, 'ancestor_processes', return_value=agent):
+                with self.assertRaisesRegex(SystemExit, 'observing side still overlaps'):
+                    record_run.require_observer_off_measured_cpus({'1': '4'})
+            wrapper = [{'pid': 4243, 'comm': 'bash', 'affinity': set(range(24)), 'cpu_seconds': 0.01}]
+            with mock.patch.object(record_run, 'ancestor_processes', return_value=wrapper):
+                record_run.require_observer_off_measured_cpus({'1': '4'})
+            moved = [{'pid': 4244, 'comm': 'node', 'affinity': {0, 1, 2, 3, 12, 13, 14, 15},
+                      'cpu_seconds': 5000.0}]
+            with mock.patch.object(record_run, 'ancestor_processes', return_value=moved):
+                record_run.require_observer_off_measured_cpus({'1': '4'})
 
     def test_observer_affinity_is_recorded_not_only_refused(self):
         # A refusal that admitted a run leaves no trace of what the observer was pinned to; the

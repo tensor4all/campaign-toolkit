@@ -138,6 +138,61 @@ def warn_if_measured_cpus_span_l3_domains(cpu_sets):
                   f"idle for the run to be admitted", file=sys.stderr)
 
 
+
+# A process that has already burned this much CPU is a worker - an agent, an editor, a browser -
+# not a wrapper shell that will sit idle around the recorder. The recorder pins itself, but the
+# agent that launched it is a long-lived process of its own, its affinity is not inherited
+# backwards, and it keeps using the cores while every cell of a run is being timed.
+WORKER_CPU_SECONDS = 1.0
+
+
+def _proc_field(pid, prefix):
+    try:
+        for line in pathlib.Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith(prefix):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+def proc_affinity(pid):
+    """The `Cpus_allowed_list` of one process, or None when it cannot be read."""
+    allowed = _proc_field(pid, "Cpus_allowed_list:")
+    return None if allowed is None else set(parse_cpu_list(allowed))
+
+
+def proc_cpu_seconds(pid):
+    """How much CPU the process has used since it started, or None when it cannot be read."""
+    try:
+        fields = pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        ticks = int(fields[11]) + int(fields[12])          # utime, stime
+        return ticks / float(os.sysconf("SC_CLK_TCK"))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def ancestor_processes(pid=None):
+    """This process and its ancestors, with the affinity and CPU time each one carries.
+
+    The affinity lives in the process: pinning the recorder does nothing for the agent that
+    launched it, and the agent keeps running while the campaign times a cell. This is the chain the
+    check has to look at, not only `os.getpid()`.
+    """
+    out = []
+    pid = os.getpid() if pid is None else pid
+    seen = set()
+    while pid and pid > 1 and pid not in seen:
+        seen.add(pid)
+        out.append({"pid": pid, "comm": _proc_field(pid, "Name:") or "?",
+                    "affinity": proc_affinity(pid), "cpu_seconds": proc_cpu_seconds(pid)})
+        try:
+            pid = int(_proc_field(pid, "PPid:"))
+        except (TypeError, ValueError):
+            break
+    return out
+
+
 def require_observer_off_measured_cpus(cpu_sets):
     """Refuse to record from a process that may run inside a measured L3 domain.
 
@@ -162,6 +217,25 @@ def require_observer_off_measured_cpus(cpu_sets):
         sys.exit(f"ERROR: this recording process may run on CPUs {shared}, inside the measured L3 "
                  f"domain(s) {sorted(domains)}; pin the observing side off them, for example "
                  f"`taskset -c {free or '?'} python3 <recorder> ...`")
+    # The recorder's own affinity is only half of it: the agent that launched it is a separate
+    # long-lived process, it keeps working while the cells are timed, and pinning the recorder does
+    # not move it. A wrapper shell that exits or idles is harmless, so the rule names workers.
+    workers = [entry for entry in ancestor_processes()
+               if entry["affinity"] and entry["affinity"] & domains
+               and (entry["cpu_seconds"] or 0.0) >= WORKER_CPU_SECONDS]
+    if workers:
+        free = format_cpu_list(free_cpus)
+        lines = [f"ERROR: the observing side still overlaps the measured L3 domain(s) "
+                 f"{sorted(domains)}; these processes have used CPU and may run the recorder "
+                 f"during the measurement:"]
+        for entry in workers:
+            lines.append(f"  pid {entry['pid']} ({entry['comm']}) affinity "
+                         f"{format_cpu_list(entry['affinity'])}, "
+                         f"{entry['cpu_seconds']:.0f} s of CPU")
+        lines.append(f"Move them off it, then start the recorder unchanged: "
+                     f"`taskset -pc {free} <pid>` for each; the recorder and its children inherit "
+                     f"the corrected affinity when they are started after the move")
+        sys.exit("\n".join(lines))
     if not free_cpus:
         # A machine with a single L3 domain (a small CI runner, a laptop with one CCX) cannot
         # separate the observer from the measurement. That is a fact about the host, not an
