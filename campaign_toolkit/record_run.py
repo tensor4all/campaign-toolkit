@@ -827,6 +827,29 @@ def main(argv=None, root=None):
             if v2:
                 verification_files.append(f'{stem}.csv')
 
+    def sources_moved():
+        """(source, why) for a measured source that changed since the recording started.
+
+        The end check is the authority; this is the same test run between process sets so a
+        mid-run edit stops the recording in minutes instead of after hours of timing.
+        """
+        moved = []
+        if v2:
+            if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
+                moved.append(('the measured binary', 'its SHA-256 changed'))
+            for source, commit in sources:
+                if (git(source, 'rev-parse', 'HEAD') != commit
+                        or git(source, 'status', '--porcelain', '--untracked-files=no')):
+                    moved.append((source, 'HEAD moved or the tree is dirty'))
+        return moved
+
+    sources = []
+    if v2:
+        sources = [(d.root, harness['commit']), (toolkit_root, toolkit['commit']),
+                   (pin[pin_env['dir']], rev)]
+        if upstream_block:
+            sources.append((upstream_block['measured_path'], upstream_block['commit']))
+
     # 2. timing, one CSV per (repeat, population, threads).
     for rep in range(args.aa):
         for population in covered:
@@ -853,6 +876,12 @@ def main(argv=None, root=None):
                 if not (run_dir / f"{stem}.csv").exists():
                     sys.exit(f"ERROR: no CSV produced for {population['regime']} {t}T")
                 csvs.append(str(run_dir / f"{stem}.csv"))
+        moved = sources_moved()
+        if moved:
+            for source, why in moved:
+                print(f'ERROR: recording stopped after process set {rep}: {source}: {why}',
+                      file=sys.stderr)
+            sys.exit(1)
 
     skipped = skipped_of(csvs)
     recorded = []
@@ -865,10 +894,6 @@ def main(argv=None, root=None):
     if v2:
         if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
             sys.exit('ERROR: measured binary changed during recording')
-        sources = [(d.root, harness['commit']), (toolkit_root, toolkit['commit']),
-                   (pin[pin_env['dir']], rev)]
-        if upstream_block:
-            sources.append((upstream_block['measured_path'], upstream_block['commit']))
         for source, commit in sources:
             if (git(source, 'rev-parse', 'HEAD') != commit
                     or git(source, 'status', '--porcelain', '--untracked-files=no')):

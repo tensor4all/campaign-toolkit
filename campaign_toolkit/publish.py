@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refresh every campaign the same way, from one plan file.
 
-    python -m campaign_toolkit.publish --plan publish.yaml [--only tlinalg] [--dry-run]
+    python -m campaign_toolkit.publish --plan publish.yaml [--only NAME] [--dry-run]
 
 The plan names, per campaign, the repository, the publication commands (in order) and the
 site step. The routine is deliberately boring:

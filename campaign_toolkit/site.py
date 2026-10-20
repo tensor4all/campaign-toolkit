@@ -5,7 +5,7 @@
 A result page is Markdown; a browser shows it as text. This writes the one HTML page a
 campaign's site serves: the pages it has, grouped by whether they were recorded at the
 current pin, the throughput charts when the campaign has them, and whatever extra section
-the campaign passes (the faer campaign links its joined four-way comparison there).
+the campaign passes (a joined comparison, for instance).
 
 It is a view over committed artifacts. It does not measure, and it does not decide
 anything: a page it lists is a page that exists under the site root.
