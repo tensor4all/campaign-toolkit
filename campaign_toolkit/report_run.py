@@ -386,7 +386,9 @@ def render(manifest, suite, rows, run_dir):
             'between-start variation can exceed the difference being compared.',
             'The `vs` columns mark only differences larger than the spread this run recorded for those',
             'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
-            '`🔵 fork X faster than <row>` / `🔴 fork X slower than <row>` (the compared row is named in',
+            f'`🔵 {descriptor.current().report.get("subject", "fork")} X faster than <row>` / '
+            f'`🔴 {descriptor.current().report.get("subject", "fork")} X slower than <row>` '
+            '(the compared row is named in',
             'the cell, not only in the column header), `·` inside the band, `-` that row is not',
             'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
             '`!` between-start range over 5%, `p` position effect over 5%, dispatch-dominated means the',
