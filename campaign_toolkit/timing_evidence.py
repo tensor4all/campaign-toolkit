@@ -132,7 +132,9 @@ def validate(manifest, run_dir):
             # A narrowed verify leaves declared cells unverified - a larger shape of a family that
             # was checked below it. They are still declared and must appear and succeed; what they
             # do not get is a status comparison, because there is no verified status for them.
-            here = {key for key in expected_cells(manifest) if (key[0], key[9]) == group}
+            # `expected_cells` carries the ten base cells; a census key adds the note, which is
+            # empty for a cell that was never checked.
+            here = {key + ('',) for key in expected_cells(manifest) if (key[0], key[9]) == group}
             for key in here - set(expected):
                 expected[key] = 'ok'
         actual = {}
