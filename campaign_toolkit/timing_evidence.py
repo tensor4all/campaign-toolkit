@@ -94,11 +94,12 @@ def validate(manifest, run_dir):
     grid = (manifest.get('verification') or {}).get('grid') or {}
     narrowed = {str(v) for v in grid.get('n', [])}
     narrow_threads = {str(v) for v in grid.get('threads', [])}
+    checked = expected
     if narrowed:
-        expected = {k for k in expected if k[BASE.index('n')] in narrowed}
+        checked = {k for k in checked if k[BASE.index('n')] in narrowed}
     if narrow_threads:
-        expected = {k for k in expected if k[BASE.index('threads')] in narrow_threads}
-    if bases != expected:
+        checked = {k for k in checked if k[BASE.index('threads')] in narrow_threads}
+    if bases != checked:
         raise ValueError('verification census does not match the declared run grid')
     # The process groups are the *declared* ones: the verify grid may be narrower than the timing
     # grid, and a run must still carry a timing file for every regime at every declared budget.
