@@ -93,11 +93,12 @@ declare the grid its verify runs on, separately from the grid it times:
 ```yaml
 verify:
   n: ["4", "8", "16"]
-  threads: [1]
 ```
 
-Both keys are optional and both **narrow** the declared grid - the recorder refuses a value the
-declaration itself does not cover, and the validator compares the census with the cells the run
-claims to have checked rather than with the whole timing grid. `run.yaml` records the grid under
+The block **narrows** the declared grid - the recorder refuses a value the declaration itself does
+not cover - and the validator compares the census with the cells the run claims to have checked
+rather than with the whole timing grid. Only the shape axis can be narrowed: a timed cell at a
+budget the verify skipped would be an unchecked number on a page, so `verify.threads` is refused
+outright. A population the block does not name (a canary with one shape) keeps its own. `run.yaml` records the grid under
 `verification.grid`, so a page can say what was checked instead of implying it checked everything.
 Leaving the block out keeps the old behaviour, which is what every campaign did before.
