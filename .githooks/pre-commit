@@ -1,0 +1,59 @@
+#!/bin/sh
+# Guards against the four ways this campaign has broken its own record:
+#
+#   1. changing the tree while a measurement owns it. The recorder refuses a run
+#      whose source moved under it, but only at the end, after hours of timing;
+#      this refuses the commit instead.
+#   2. committing a Python file that does not parse (a nested f-string that the
+#      running interpreter accepts and the file's form does not).
+#   3. committing a workflow that does not parse. A colon inside an unquoted
+#      `run:` scalar is a YAML error that GitHub reports only as a failed run.
+#   4. committing a pin whose hash does not resolve in any local checkout.
+#
+# Install once per clone:  git config core.hooksPath .githooks
+set -e
+root=$(git rev-parse --show-toplevel)
+
+# 1. a measurement holds target/campaign.lock
+lock="$root/target/campaign.lock"
+if [ -e "$lock" ] && ! flock -n "$lock" true 2>/dev/null; then
+    echo "pre-commit: a campaign measurement holds target/campaign.lock." >&2
+    echo "pre-commit: commit after it finishes; changing the tree mid-run refuses the run." >&2
+    exit 1
+fi
+
+changed=$(git diff --cached --name-only --diff-filter=ACM)
+
+# 2. Python parses
+for f in $(printf '%s\n' "$changed" | grep '\.py$' || true); do
+    if ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$f"; then
+        echo "pre-commit: $f does not parse" >&2
+        exit 1
+    fi
+done
+
+# 3. workflow YAML parses
+for f in $(printf '%s\n' "$changed" | grep -E '^\.github/workflows/.*\.ya?ml$' || true); do
+    if ! python3 -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]))' "$f"; then
+        echo "pre-commit: $f is not valid YAML (quote a colon in a run: block)" >&2
+        exit 1
+    fi
+done
+
+# 4. pin hashes resolve somewhere reachable
+for f in $(printf '%s\n' "$changed" | grep -E '^pins/.*\.rev$' || true); do
+    for sha in $(grep -E '^[0-9a-f]{40}$' "$f" || true); do
+        found=0
+        for repo in "$root" "$root/../faer" "$root"/extern/*/; do
+            [ -d "$repo/.git" ] || continue
+            if git -C "$repo" cat-file -e "$sha^{commit}" 2>/dev/null; then found=1; break; fi
+        done
+        if [ "$found" -eq 0 ]; then
+            echo "pre-commit: $f names $sha, which no local checkout can resolve" >&2
+            echo "pre-commit: write pins with \$(git -C <repo> rev-parse HEAD), never by hand" >&2
+            exit 1
+        fi
+    done
+done
+
+exit 0
