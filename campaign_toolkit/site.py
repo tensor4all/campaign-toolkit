@@ -58,7 +58,9 @@ def _pin_revisions(root, pins):
 
 def _pages(site_root):
     pages = [p for p in site_root.rglob('*.md')
-             if p.name not in ('INDEX.md', 'README.md') and not p.name.startswith('index')]
+             if p.name not in ('INDEX.md', 'README.md') and not p.name.startswith('index')
+             # chart data tables belong to their chart, not to the page list
+             and 'throughput' not in p.parts]
     return sorted(pages)
 
 
