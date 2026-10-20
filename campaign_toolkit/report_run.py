@@ -397,12 +397,15 @@ def render(manifest, suite, rows, run_dir):
             'per-start median range exceeds 5% of its median, and `p` a balanced cell whose estimated',
             'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
             'between-start variation can exceed the difference being compared.',
-            'The `vs` columns mark only differences larger than the spread this run recorded for those',
-            'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
-            '`🔵 <row> X faster than <row>` / `🔴 <row> X slower than <row>` '
-            '(the subject is the first column of the table, the compared row is named in',
-            'the cell, not only in the column header), `·` inside the band, `-` that row is not',
-            'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
+            *( [] if not descriptor.current().report.get('verdicts', True) else [
+                'The `vs` columns mark only differences larger than the spread this run recorded for those',
+                'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
+                '`🔵 <row> X faster than <row>` / `🔴 <row> X slower than <row>` '
+                '(the subject is the first column of the table, the compared row is named in',
+                'the cell, not only in the column header), `·` inside the band, `-` that row is not',
+                'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
+            ]),
+
             '`!` between-start range over 5%, `p` position effect over 5%, dispatch-dominated means the',
             'row is under 20 us so 4T/8T pay thread-region start-up). Per-start ratios and every',
             'chronological sample are in the run directory named at the top of this page (`run*.csv`).',
