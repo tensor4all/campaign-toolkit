@@ -128,7 +128,13 @@ def validate(manifest, run_dir):
         if (repeat, group) in seen_groups or group not in groups:
             raise ValueError(f'{name}: duplicate or unexpected process group')
         seen_groups.add((repeat, group))
-        expected = {key: status for key, status in census.items() if (key[0], key[9]) == group}
+        # The declared cells of this process group, with the census's status where the verify
+        # covered the cell. A cell the narrowed grid did not check (a larger shape of a family
+        # that was checked below it) is still a declared cell that must appear and succeed; what
+        # it does not get is a status comparison, because there is no verified status to compare
+        # with.
+        expected = {key: census.get(key, 'ok')
+                    for key in expected_cells(manifest) if (key[0], key[9]) == group}
         actual = {}
         order_by_case = {}
         for row in rows:
