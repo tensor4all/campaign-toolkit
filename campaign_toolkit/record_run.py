@@ -811,16 +811,32 @@ def main(argv=None, root=None):
     csvs = []
     verification_files = []
 
-    # 1. correctness first, for the whole covered grid, at every budget.
+    # 1. correctness first. A suite may declare the grid its verify runs on (`verify:` with `n`
+    # and/or `threads`), because a verify recomputes every case and one expensive shape must not
+    # decide whether a publication happens at all: the timing grid stays what the declaration
+    # says, and the check is stated rather than implied. Without the block the verify covers the
+    # whole declared grid, which is what every campaign did before.
+    verify_grid = suite.get("verify") or {}
+    declared_n = {str(n) for population in covered for n in population["n"]}
+    for key in ("n", "threads"):
+        if key in verify_grid:
+            unknown = {str(v) for v in verify_grid[key]} - ({declared_n} if key == "n"
+                                                            else {str(t) for t in threads})
+            if unknown:
+                sys.exit(f"ERROR: verify.{key} names {sorted(unknown)}, which the declaration "
+                         f"does not cover; a check may narrow the grid, never widen it")
+    verify_threads = [t for t in threads if str(t) in {str(v) for v in verify_grid.get("threads", threads)}]
     for population in covered:
-        for t in threads:
+        population_n = [n for n in population["n"]
+                        if str(n) in {str(v) for v in verify_grid.get("n", population["n"])}]
+        for t in verify_threads:
             stem = f"verify-{population['regime']}-{t}t"
             out = run_dir / f"{stem}.txt"
             guard = run_dir / f"{stem}.guard"
             r = subprocess.run([str(pinned), cpu_sets[str(t)], "--", str(binary), "verify",
                                 *harness_args, *verify_args,
                                 "--threads", str(t),
-                                "--n", ",".join(population["n"]),
+                                "--n", ",".join(population_n),
                                 "--batch", ",".join(str(b) for b in population["batch"]),
                                 "--dtype", ",".join(dtypes),
                                 "--family", ",".join(population["families"]),
@@ -962,6 +978,7 @@ def main(argv=None, root=None):
         "providers": providers_for(engines, identity,
                                    lock_providers(pathlib.Path(pin[pin_env["dir"]]) / "Cargo.lock"),
                                    external),
+        **({"verification": {"grid": verify_grid}} if verify_grid else {}),
         "invalidated_by": suite.get("invalidated_by", d.default_invalidated_by),
         "result_files": [pathlib.Path(c).name for c in csvs],
         "run_spec": {

@@ -86,7 +86,19 @@ def validate(manifest, run_dir):
                 raise ValueError(f'{name}: duplicate or failed verification cell {key}')
             census[key] = row['status']
     bases = {key[:-1] for key in census}
-    if bases != expected_cells(manifest):
+    expected = expected_cells(manifest)
+    # A suite may narrow the grid its verify runs on: the check is stated by the run rather than
+    # implied by the timing grid, because recomputing every case can cost more than the run it
+    # guards. A narrowed grid must be a subset of what the declaration covers - the recorder
+    # refuses one that is not - so the census is compared with the cells it claims to have checked.
+    grid = (manifest.get('verification') or {}).get('grid') or {}
+    narrowed = {str(v) for v in grid.get('n', [])}
+    narrow_threads = {str(v) for v in grid.get('threads', [])}
+    if narrowed:
+        expected = {k for k in expected if k[BASE.index('n')] in narrowed}
+    if narrow_threads:
+        expected = {k for k in expected if k[BASE.index('threads')] in narrow_threads}
+    if bases != expected:
         raise ValueError('verification census does not match the declared run grid')
     groups = {(key[0], key[9]) for key in census}
     seen_groups = set()

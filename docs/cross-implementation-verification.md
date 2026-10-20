@@ -82,3 +82,22 @@ cross-language comparison needs.
 `tests/test_toolkit.py` carries a unit test: two fake arms whose outputs differ by a permutation
 must agree on `sum` and `sum_sq` and disagree on `weighted`. A contract that cannot fail is not a
 check.
+
+## The verify grid (#28)
+
+A verify recomputes every case it covers, so its cost is a real constraint on a publication: at
+batch 1024 one shape took forty-five minutes on this host, which is longer than the timing pass it
+guards and enough to make a whole campaign's shape grid look unaffordable. A suite can therefore
+declare the grid its verify runs on, separately from the grid it times:
+
+```yaml
+verify:
+  n: ["4", "8", "16"]
+  threads: [1]
+```
+
+Both keys are optional and both **narrow** the declared grid - the recorder refuses a value the
+declaration itself does not cover, and the validator compares the census with the cells the run
+claims to have checked rather than with the whole timing grid. `run.yaml` records the grid under
+`verification.grid`, so a page can say what was checked instead of implying it checked everything.
+Leaving the block out keeps the old behaviour, which is what every campaign did before.
