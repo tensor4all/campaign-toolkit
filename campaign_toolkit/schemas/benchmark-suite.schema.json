@@ -255,6 +255,13 @@
           }
         }
       }
+    },
+    "verify_args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Arguments for the census/verify invocation only."
     }
   }
 }

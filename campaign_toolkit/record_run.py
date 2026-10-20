@@ -757,8 +757,9 @@ def main(argv=None, root=None):
     # Arguments that belong to a verify and not to a timing pass. A campaign whose single row has
     # no sibling to compare against hands its harness another arm's diagnostics here; the timing
     # invocation must not see them, or a measurement would depend on the reference it was
-    # checked against.
-    verify_args = list(d.measured.get("verify_args") or [])
+    # checked against. A suite may declare its own, because two strategies of one campaign are
+    # checked against two different references and one descriptor cannot say both.
+    verify_args = list(suite.get("verify_args") or d.measured.get("verify_args") or [])
     binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest() if v2 else None
     if v2:
         (run_dir / 'build-info.json').write_text(json.dumps({
