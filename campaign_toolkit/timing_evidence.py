@@ -96,9 +96,17 @@ def validate(manifest, run_dir):
     narrow_threads = {str(v) for v in grid.get('threads', [])}
     checked = expected
     if narrowed:
-        checked = {k for k in checked if k[BASE.index('n')] in narrowed}
-    if narrow_threads:
-        checked = {k for k in checked if k[BASE.index('threads')] in narrow_threads}
+        # The recorder narrows a population only if the narrowed shapes name some of it; a
+        # population the grid does not name keeps its own (a canary with one shape), so the same
+        # rule has to be applied here or the census it produced looks incomplete.
+        by_regime = {}
+        for k in expected:
+            by_regime.setdefault(k[0], set()).add(k[BASE.index('n')])
+        checked = {
+            k for k in expected
+            if k[BASE.index('n')] in narrowed
+            or not (by_regime[k[0]] & narrowed)
+        }
     if bases != checked:
         raise ValueError('verification census does not match the declared run grid')
     # The process groups are the *declared* ones: the verify grid may be narrower than the timing
