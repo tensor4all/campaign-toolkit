@@ -93,7 +93,6 @@ def validate(manifest, run_dir):
     # refuses one that is not - so the census is compared with the cells it claims to have checked.
     grid = (manifest.get('verification') or {}).get('grid') or {}
     narrowed = {str(v) for v in grid.get('n', [])}
-    narrow_threads = {str(v) for v in grid.get('threads', [])}
     checked = expected
     if narrowed:
         # The recorder narrows a population only if the narrowed shapes name some of it; a
