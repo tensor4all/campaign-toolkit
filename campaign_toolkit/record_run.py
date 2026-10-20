@@ -39,8 +39,8 @@ import time
 import yaml
 
 from . import descriptor
-from .campaign import (engines_for_vendor, populations, provider_of, same_populations,
-                       vendor_engines)
+from .campaign import (check_cpu_sets, engines_for_vendor, populations, provider_of,
+                       same_populations, vendor_engines)
 
 
 def sh(cmd, **kw):
@@ -696,6 +696,7 @@ def main(argv=None, root=None):
     external = (load_external_providers(args.external_provider_json)
                 if args.external_provider_json else [])
     require_external_identities(engines, external)
+    check_cpu_sets(suite)
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
     warn_if_measured_cpus_span_l3_domains(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)

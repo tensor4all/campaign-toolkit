@@ -117,6 +117,31 @@ def vendor_of_engines(engines) -> "str | None":
     return vendors[0] if len(vendors) == 1 else None
 
 
+def check_cpu_sets(suite: dict) -> None:
+    """Refuse a declaration whose CPU sets cannot hold the thread budgets it pairs them with.
+
+    A suite declares `threads` and `cpu_sets` positionally: the budget at index i is pinned to
+    the set at index i. Two mistakes are silent without this check and both produce a run that
+    measures less than it claims - a list shorter than the budgets (an index error, or the wrong
+    budget pinned), and a set with fewer CPUs than the budget it is paired with, which is what an
+    8-thread arm pinned to one core looks like in the manifest.
+    """
+    spec = run_spec(suite)
+    threads, sets = spec.get("threads", []), spec.get("cpu_sets", [])
+    if len(threads) != len(sets):
+        raise SystemExit(f"ERROR: this suite declares {len(threads)} thread budgets {threads} but "
+                         f"{len(sets)} cpu sets {sets}; they are paired by position")
+    for budget, cpus in zip(threads, sets):
+        count = sum(len(range(*map(int, part.split("-")))) if "-" in str(part)
+                    else 1 for part in str(cpus).split(","))
+        count = sum((int(p.split("-")[1]) - int(p.split("-")[0]) + 1) if "-" in str(p) else 1
+                    for p in str(cpus).split(","))
+        if count < int(budget):
+            raise SystemExit(f"ERROR: the {budget}-thread budget is paired with cpu set {cpus!r}, "
+                             f"which holds {count} cpu(s); threads on fewer cpus than the budget "
+                             f"measure something other than the declared budget")
+
+
 def engines_for_vendor(suite: dict, vendor: str) -> list:
     """The engines one vendor arm of this suite is expected to measure.
 
