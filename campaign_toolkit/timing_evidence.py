@@ -100,7 +100,11 @@ def validate(manifest, run_dir):
         expected = {k for k in expected if k[BASE.index('threads')] in narrow_threads}
     if bases != expected:
         raise ValueError('verification census does not match the declared run grid')
-    groups = {(key[0], key[9]) for key in census}
+    # The process groups are the *declared* ones: the verify grid may be narrower than the timing
+    # grid, and a run must still carry a timing file for every regime at every declared budget.
+    groups = {(str(pop['regime']), str(t))
+              for pop in manifest['run_spec']['populations']
+              for t in manifest['threads']['counts']}
     seen_groups = set()
     for name in manifest['result_files']:
         match = re.match(r'^run(\d+)-', name)
