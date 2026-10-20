@@ -44,7 +44,7 @@ done
 for f in $(printf '%s\n' "$changed" | grep -E '^pins/.*\.rev$' || true); do
     for sha in $(grep -E '^[0-9a-f]{40}$' "$f" || true); do
         found=0
-        for repo in "$root" "$root/../faer" "$root"/extern/*/; do
+        for repo in "$root" "$root/../faer" "$root/../campaign-toolkit" "$root"/extern/*/; do
             [ -d "$repo/.git" ] || continue
             if git -C "$repo" cat-file -e "$sha^{commit}" 2>/dev/null; then found=1; break; fi
         done
