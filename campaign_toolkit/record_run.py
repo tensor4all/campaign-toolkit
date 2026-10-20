@@ -818,14 +818,16 @@ def main(argv=None, root=None):
     # whole declared grid, which is what every campaign did before.
     verify_grid = suite.get("verify") or {}
     declared_n = {str(n) for population in covered for n in population["n"]}
-    for key in ("n", "threads"):
-        if key in verify_grid:
-            unknown = {str(v) for v in verify_grid[key]} - ({declared_n} if key == "n"
-                                                            else {str(t) for t in threads})
-            if unknown:
-                sys.exit(f"ERROR: verify.{key} names {sorted(unknown)}, which the declaration "
-                         f"does not cover; a check may narrow the grid, never widen it")
-    verify_threads = [t for t in threads if str(t) in {str(v) for v in verify_grid.get("threads", threads)}]
+    if "threads" in verify_grid:
+        sys.exit("ERROR: verify.threads would publish a budget nothing verified; a check may "
+                 "narrow the shapes it runs on, not the budgets, because a timed cell at a "
+                 "budget the verify skipped is an unchecked number")
+    if "n" in verify_grid:
+        unknown = {str(v) for v in verify_grid["n"]} - declared_n
+        if unknown:
+            sys.exit(f"ERROR: verify.n names {sorted(unknown)}, which the declaration does not "
+                     f"cover; a check may narrow the grid, never widen it")
+    verify_threads = threads
     for population in covered:
         population_n = [n for n in population["n"]
                         if str(n) in {str(v) for v in verify_grid.get("n", population["n"])}]

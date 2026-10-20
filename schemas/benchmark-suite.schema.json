@@ -266,12 +266,9 @@
     "verify": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The grid the untimed verify runs on; omitted means the declared grid.",
+      "description": "The shapes the untimed verify runs on; narrowed, never widened. Every timed budget is still verified.",
       "properties": {
         "n": {
-          "type": "array"
-        },
-        "threads": {
           "type": "array"
         }
       }
