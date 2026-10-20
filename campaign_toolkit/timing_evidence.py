@@ -128,6 +128,13 @@ def validate(manifest, run_dir):
             raise ValueError(f'{name}: duplicate or unexpected process group')
         seen_groups.add((repeat, group))
         expected = {key: status for key, status in census.items() if (key[0], key[9]) == group}
+        if grid:
+            # A narrowed verify leaves declared cells unverified - a larger shape of a family that
+            # was checked below it. They are still declared and must appear and succeed; what they
+            # do not get is a status comparison, because there is no verified status for them.
+            here = {key for key in expected_cells(manifest) if (key[0], key[9]) == group}
+            for key in here - set(expected):
+                expected[key] = 'ok'
         actual = {}
         order_by_case = {}
         for row in rows:
