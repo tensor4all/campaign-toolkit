@@ -405,6 +405,9 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "verdicts": {
+          "type": "boolean"
         }
       }
     }

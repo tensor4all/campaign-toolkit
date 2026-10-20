@@ -438,11 +438,17 @@ def render(manifest, suite, rows, run_dir):
                     # v2 drops the raw ratio column - the per-start ratios and every chronological
                     # sample are in the run's own CSVs - and keeps one verdict column per other row
                     # plus a separate notes column for the cell's warnings.
+                    # A campaign whose rows are two modes of one library carries no verdict: a
+                    # ratio between two schedules of the same code is not a comparison between
+                    # implementations, and a column of coloured ratios invites it to be read as one.
+                    verdicts_on = bool(descriptor.current().report.get("verdicts", True))
                     out.append("| case | " + " | ".join(f"{row_label(e)} (ms)" for e in row_names) + " |"
-                               + ("" if not v2 else "".join(f" vs `{row_label(e)}` |"
-                                                            for e in row_names[1:]))
+                               + ("" if not v2 or not verdicts_on
+                                  else "".join(f" vs `{row_label(e)}` |" for e in row_names[1:]))
                                + (" notes |" if v2 else " |"))
-                    out.append("|" + "---|" * (len(row_names) + (2 if not v2 else 2 + len(row_names) - 1)))
+                    columns = (len(row_names) + (2 if not v2
+                                                 else (2 + len(row_names) - 1 if verdicts_on else 1)))
+                    out.append("|" + "---|" * columns)
                     subject = (descriptor.current().report.get('subject')
                                or row_label(row_names[0]))
                     for case in cases:
@@ -459,10 +465,11 @@ def render(manifest, suite, rows, run_dir):
                             balanced, between, position = cell_statistics(series, key, row_names)
                             forks = best.get(key, {}).get(row_names[0]) or []
                             fork_us = statistics.median(forks) if forks else None
-                            verdicts = comparison_verdict(best, within, key, row_names)
-                            for engine in row_names[1:]:
-                                cells.append(verdict_text(
-                                    verdicts.get(engine), fork_us, row_label(engine), subject))
+                            if verdicts_on:
+                                verdicts = comparison_verdict(best, within, key, row_names)
+                                for engine in row_names[1:]:
+                                    cells.append(verdict_text(
+                                        verdicts.get(engine), fork_us, row_label(engine), subject))
                             notes = []
                             if not balanced:
                                 notes.append('`*` one row has no measurement here')
