@@ -220,12 +220,13 @@ def comparison_verdict(best, within, key, row_names):
     return out
 
 
-def verdict_text(verdict, fork_us, other):
-    """`🔵 fork 2.5x faster than <row>` / `🔴 fork 2.5x slower than <row>` / `·` / `-`.
+def verdict_text(verdict, fork_us, other, subject='fork'):
+    """`🔵 <subject> 2.5x faster than <row>` / `🔴 <subject> 2.5x slower than <row>` / `·` / `-`.
 
-    The subject is the fork and the object is named in the cell, so a BLAS row and an upstream row
-    can never be confused when the columns are read apart: blue means the fork is faster than that
-    named row, red means it is slower.
+    The subject is the measured library and the object is named in the cell, so a BLAS row and an
+    upstream row can never be confused when the columns are read apart: blue means the subject is
+    faster than that named row, red means it is slower. The name comes from the descriptor's
+    `report.subject`, because not every campaign measures a fork.
     """
     if verdict is None:
         return '-'
@@ -233,7 +234,7 @@ def verdict_text(verdict, fork_us, other):
         return '·'
     ratio, _ = verdict
     mark = '🔴' if ratio > 1 else '🔵'
-    return (f'{mark} fork {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
+    return (f'{mark} {subject} {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
             + f' than `{other}`')
 
 
@@ -384,7 +385,7 @@ def render(manifest, suite, rows, run_dir):
             'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
             'between-start variation can exceed the difference being compared.',
             'The `vs` columns mark only differences larger than the spread this run recorded for those',
-            'two rows (combined between-start SD, floored at 5%), always with the fork as the subject:',
+            'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
             '`🔵 fork X faster than <row>` / `🔴 fork X slower than <row>` (the compared row is named in',
             'the cell, not only in the column header), `·` inside the band, `-` that row is not',
             'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
@@ -445,7 +446,9 @@ def render(manifest, suite, rows, run_dir):
                             fork_us = statistics.median(forks) if forks else None
                             verdicts = comparison_verdict(best, within, key, row_names)
                             for engine in row_names[1:]:
-                                cells.append(verdict_text(verdicts.get(engine), fork_us, engine))
+                                cells.append(verdict_text(
+                                    verdicts.get(engine), fork_us, engine,
+                                    descriptor.current().report.get('subject', 'fork')))
                             notes = []
                             if not balanced:
                                 notes.append('`*` one row has no measurement here')

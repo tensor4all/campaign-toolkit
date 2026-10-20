@@ -396,6 +396,9 @@
         "setup_script": {
           "type": "string",
           "minLength": 1
+        },
+        "subject": {
+          "type": "string"
         }
       }
     }
