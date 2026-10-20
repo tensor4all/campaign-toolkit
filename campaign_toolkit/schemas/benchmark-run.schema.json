@@ -193,21 +193,42 @@
     },
     "binary": {
       "type": "object",
-      "required": ["path", "sha256"],
+      "required": [
+        "path",
+        "sha256"
+      ],
       "additionalProperties": false,
       "properties": {
-        "path": {"type": "string", "minLength": 1},
-        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
       }
     },
     "toolkit": {
       "type": "object",
-      "required": ["commit", "dirty", "measured_path"],
+      "required": [
+        "commit",
+        "dirty",
+        "measured_path"
+      ],
       "additionalProperties": false,
       "properties": {
-        "commit": {"type": "string", "minLength": 1},
-        "dirty": {"type": "boolean"},
-        "measured_path": {"type": "string", "minLength": 1}
+        "commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "measured_path": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "harness": {
@@ -239,13 +260,37 @@
       ],
       "additionalProperties": false,
       "properties": {
-          "power": {"type": ["object", "null"],
-            "description": "Power/frequency controls in force while measuring, read from sysfs when the host exposes them.",
-            "additionalProperties": false,
-            "properties": {"cpufreq_boost": {"type": "string"}, "intel_no_turbo": {"type": "string"},
-                           "amd_pstate_status": {"type": "string"}, "platform_profile": {"type": "string"},
-                           "governor": {"type": "string"}, "energy_performance_preference": {"type": "string"},
-                           "scaling_max_freq_khz": {"type": "string"}}},
+        "power": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Power/frequency controls in force while measuring, read from sysfs when the host exposes them.",
+          "additionalProperties": false,
+          "properties": {
+            "cpufreq_boost": {
+              "type": "string"
+            },
+            "intel_no_turbo": {
+              "type": "string"
+            },
+            "amd_pstate_status": {
+              "type": "string"
+            },
+            "platform_profile": {
+              "type": "string"
+            },
+            "governor": {
+              "type": "string"
+            },
+            "energy_performance_preference": {
+              "type": "string"
+            },
+            "scaling_max_freq_khz": {
+              "type": "string"
+            }
+          }
+        },
         "hostname": {
           "type": "string"
         },
@@ -364,7 +409,10 @@
       "additionalProperties": false,
       "properties": {
         "version": {
-          "enum": [1, 2]
+          "enum": [
+            1,
+            2
+          ]
         },
         "row_rotation_step": {
           "type": "integer",
@@ -486,7 +534,9 @@
     },
     "verification_files": {
       "type": "array",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "minItems": 1,
       "uniqueItems": true
     },
@@ -602,6 +652,15 @@
       ],
       "pattern": "^[0-9a-f]{64}$",
       "description": "Hash of the suite declaration in force when the run was taken. Evidence is immutable and declarations are not: without this, a manifest and a later declaration can disagree with no way to tell which moved."
+    },
+    "verification": {
+      "type": "object",
+      "description": "The grid the verify checked, when it is narrower than the timing grid.",
+      "properties": {
+        "grid": {
+          "type": "object"
+        }
+      }
     }
   }
 }
