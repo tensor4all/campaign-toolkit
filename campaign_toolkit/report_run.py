@@ -220,6 +220,16 @@ def comparison_verdict(best, within, key, row_names):
     return out
 
 
+def row_label(engine):
+    """The name a row is printed under: the descriptor's `report.row_labels`, or the row itself.
+
+    The harness names a row after what it measures (a provider variant, an order), and a campaign
+    whose table is a competition may want to print the library's name instead. The key stays the
+    row's own name: only the label changes.
+    """
+    return (descriptor.current().report.get('row_labels') or {}).get(engine, engine)
+
+
 def verdict_text(verdict, fork_us, other, subject='fork'):
     """`🔵 <subject> 2.5x faster than <row>` / `🔴 <subject> 2.5x slower than <row>` / `·` / `-`.
 
@@ -374,8 +384,9 @@ def render(manifest, suite, rows, run_dir):
             f"Each process retains {manifest['timing_policy']['repetitions']} chronological calls; "
             f"{manifest['run_spec']['aa']} complete process sets are recorded.",
             spread_guide_text(best, within),
-            f"The `vs {row_names[0]}` column is the rotation-averaged ratio exp(mean over starts of",
-            f"log(engine median / {row_names[0]} median)), with the per-start ratios beside it: `R > 1`",
+            f"The `vs {row_label(row_names[0])}` column is the rotation-averaged ratio",
+            f"exp(mean over starts of log(engine median / {row_label(row_names[0])} median)),",
+            "with the per-start ratios beside it: `R > 1`",
             'means the engine was slower than that first-declared row in that start. It removes a',
             'row-position',
             'effect only under one position effect shared by the engines and stable across starts,',
@@ -428,8 +439,9 @@ def render(manifest, suite, rows, run_dir):
                     # v2 drops the raw ratio column - the per-start ratios and every chronological
                     # sample are in the run's own CSVs - and keeps one verdict column per other row
                     # plus a separate notes column for the cell's warnings.
-                    out.append("| case | " + " | ".join(f"{e} (ms)" for e in row_names) + " |"
-                               + ("" if not v2 else "".join(f" vs `{e}` |" for e in row_names[1:]))
+                    out.append("| case | " + " | ".join(f"{row_label(e)} (ms)" for e in row_names) + " |"
+                               + ("" if not v2 else "".join(f" vs `{row_label(e)}` |"
+                                                            for e in row_names[1:]))
                                + (" notes |" if v2 else " |"))
                     out.append("|" + "---|" * (len(row_names) + (2 if not v2 else 2 + len(row_names) - 1)))
                     for case in cases:
@@ -449,7 +461,7 @@ def render(manifest, suite, rows, run_dir):
                             verdicts = comparison_verdict(best, within, key, row_names)
                             for engine in row_names[1:]:
                                 cells.append(verdict_text(
-                                    verdicts.get(engine), fork_us, engine,
+                                    verdicts.get(engine), fork_us, row_label(engine),
                                     descriptor.current().report.get('subject', 'fork')))
                             notes = []
                             if not balanced:

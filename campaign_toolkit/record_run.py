@@ -794,7 +794,11 @@ def main(argv=None, root=None):
         sys.exit(f"ERROR: this run records the {arm} arm, but the harness built for it reports "
                  f"{identity.get('vendor.name')!r}; a page may not name a vendor the binary did "
                  f"not link")
-    vendor_record = vendor_block(identity, pin.get(pin_env.get("env", "BUILD_ENV")))
+    # A suite with no vendor engine is not comparing against a vendor: what the binary happens
+    # to link is a build detail, not a comparison subject, and a manifest that named it would
+    # claim an arm the declaration never asked for (validate_run refuses exactly that).
+    vendor_record = (vendor_block(identity, pin.get(pin_env.get("env", "BUILD_ENV")))
+                     if arm is not None else None)
 
     guards = []
     csvs = []
