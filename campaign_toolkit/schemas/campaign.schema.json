@@ -160,6 +160,12 @@
             "type": "string"
           },
           "description": "Extra arguments appended after the harness subcommand for every `verify` and `run` invocation (for example an input corpus path the recorder cannot infer). Not passed to `info`."
+        },
+        "verify_args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

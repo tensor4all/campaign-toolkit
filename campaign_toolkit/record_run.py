@@ -754,6 +754,11 @@ def main(argv=None, root=None):
     bin_dir = pathlib.Path(pin[pin_env.get("bin_dir", "BIN_DIR")])
     binary = bin_dir / d.measured["binary"]
     harness_args = list(d.measured.get("harness_args") or [])
+    # Arguments that belong to a verify and not to a timing pass. A campaign whose single row has
+    # no sibling to compare against hands its harness another arm's diagnostics here; the timing
+    # invocation must not see them, or a measurement would depend on the reference it was
+    # checked against.
+    verify_args = list(d.measured.get("verify_args") or [])
     binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest() if v2 else None
     if v2:
         (run_dir / 'build-info.json').write_text(json.dumps({
@@ -811,7 +816,8 @@ def main(argv=None, root=None):
             stem = f"verify-{population['regime']}-{t}t"
             out = run_dir / f"{stem}.txt"
             guard = run_dir / f"{stem}.guard"
-            r = subprocess.run([str(pinned), cpu_sets[str(t)], "--", str(binary), "verify", *harness_args,
+            r = subprocess.run([str(pinned), cpu_sets[str(t)], "--", str(binary), "verify",
+                                *harness_args, *verify_args,
                                 "--threads", str(t),
                                 "--n", ",".join(population["n"]),
                                 "--batch", ",".join(str(b) for b in population["batch"]),
