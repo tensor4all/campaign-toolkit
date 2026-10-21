@@ -14,6 +14,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 import unittest
 from unittest import mock
@@ -129,6 +130,7 @@ class FixtureCampaignTest(unittest.TestCase):
                   # The fixture asserts the pipeline, not the host's power state: a CI runner with
                   # turbo enabled must not decide whether this test can run.
                   mock.patch.object(record_run, 'boost_state', return_value={}),
+                  mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
                   mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
                   mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
                                     original['library']['commit'] if args[0] == 'rev-parse' else ''),
@@ -159,8 +161,11 @@ class FixtureCampaignTest(unittest.TestCase):
                 (directory / 'report.md').write_text('harness-args test report\n')
             return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
 
+        # The fixture campaign is synthetic and must record on whatever machine runs the tests,
+        # so the audit of the *real* machine is stubbed out here; it has its own tests.
         with (mock.patch.object(record_run, 'build', return_value=pin),
               mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
               mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
               mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
                                 original['library']['commit'] if a[0] == 'rev-parse' else ''),
@@ -209,8 +214,11 @@ class FixtureCampaignTest(unittest.TestCase):
         argv = ['fixture-cpu', suite_id, '--threads', '1', '--label', label, '--no-publish', *extra]
         if external_json is not None:
             argv += ['--external-provider-json', str(external_json)]
+        # The fixture campaign is synthetic and must record on whatever machine runs the tests,
+        # so the audit of the *real* machine is stubbed out here; it has its own tests.
         with (mock.patch.object(record_run, 'build', return_value=pin),
               mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
               mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
               mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
                                 original['library']['commit'] if a[0] == 'rev-parse' else ''),
@@ -267,6 +275,7 @@ class FixtureCampaignTest(unittest.TestCase):
             argv += ['--external-provider-json', str(external_json)]
         with (mock.patch.object(record_run, 'sh', side_effect=fake_sh),
               mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
               mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
               mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
                                 original['library']['commit'] if a[0] == 'rev-parse' else ''),
@@ -461,6 +470,54 @@ class FixtureCampaignTest(unittest.TestCase):
               mock.patch('sys.stderr', new_callable=io.StringIO) as loud):
             record_run.require_observer_off_measured_cpus({'1': '4'})
             self.assertIn('shares them with the measurement', loud.getvalue())
+
+    def test_a_busy_task_outside_the_observing_side_refuses_before_the_build(self):
+        # Through main(), not the helper: the point is that the gate is reached and that nothing
+        # has been built by the time it refuses.
+        busy = [{'pid': 1234, 'comm': 'dockerd', 'uid': os.geteuid(), 'cores': 0.5, 'tasks': 2,
+                 'allowed': '0-23', 'unknown_tasks': 0}]
+        built = []
+
+        def explode(*args, **kwargs):
+            built.append(args)
+            raise AssertionError('build ran although the observing side was busy')
+
+        with (mock.patch.object(record_run, 'build', side_effect=explode),
+              mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.observer_audit, 'offenders', return_value=(busy, [], 0)),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8})):
+            with self.assertRaisesRegex(SystemExit, 'observer_audit --observer [0-9-]+,[0-9-]+'):
+                record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1',
+                                 '--no-publish'], root=self.root)
+        self.assertEqual(built, [], 'the build ran before the observing side was checked')
+
+    def test_the_observer_audit_names_a_process_that_may_run_on_a_measured_core(self):
+        # The rule is about masks, not ancestry: a daemon the recorder never spawned, or a
+        # leftover of the operator's, is what actually spoiled windows. Two busy children, one
+        # confined to the observing side and one not, must be told apart.
+        from campaign_toolkit import observer_audit
+        cpus = sorted(os.sched_getaffinity(0))
+        if len(cpus) < 2:
+            self.skipTest("needs at least two CPUs to split observing side from measured")
+        observer, measured = set(cpus[:-1]), cpus[-1]
+        burn = ("import os, sys, time\n"
+                "os.sched_setaffinity(0, {int(sys.argv[1])})\n"
+                "end = time.time() + 5\n"
+                "while time.time() < end: pass\n")
+        away = subprocess.Popen([sys.executable, "-c", burn, str(measured)])
+        home = subprocess.Popen([sys.executable, "-c", burn, str(cpus[0])])
+        try:
+            time.sleep(0.4)                       # let both reach the loop
+            bad, foreign, _ = observer_audit.offenders(observer, seconds=0.4)
+            named = {entry['pid']: entry for entry in bad}
+            self.assertIn(away.pid, named, "a process allowed on a measured core was not reported")
+            self.assertEqual(named[away.pid]['allowed'], str(measured))
+            self.assertNotIn(home.pid, named, "a process confined to the observing side was reported")
+            self.assertEqual(foreign, [], "our own children were reported as another user's")
+        finally:
+            for child in (away, home):
+                child.kill()
+                child.wait()
 
     def test_host_role_defaults_to_development_and_can_be_the_measurement_host(self):
         with (mock.patch.object(record_run.platform, 'node', return_value='x'),

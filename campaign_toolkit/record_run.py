@@ -38,7 +38,7 @@ import time
 
 import yaml
 
-from . import descriptor
+from . import descriptor, observer_audit
 from .campaign import (check_cpu_sets, engines_for_vendor, populations, provider_of,
                        same_populations, vendor_engines)
 
@@ -367,6 +367,44 @@ def build(checkout, vendor, upstream=None, features=()):
         k, _, v = assignment.partition("=")
         pin[k] = v
     return pin
+
+
+def require_quiet_observing_side(cpu_sets):
+    """Refuse to record while a task that used CPU may run on a measured core.
+
+    `require_observer_off_measured_cpus` above covers this process and its ancestors, and it is
+    not enough: the things that actually spoiled windows here were a daemon the recorder never
+    spawned and a leftover of the operator's own, neither an ancestor and neither visible in a
+    container's PID namespace. So the question is asked of the whole machine, by mask rather than
+    by ancestry: a task that consumed CPU while its affinity reaches a measured domain may have
+    run there, and "may have" is not evidence.
+
+    Refusing with the culprit named is cheaper than discovering it in the guard log after a build
+    and a verify pass, which is how this was found every time. The remedy is printed with the
+    finding because it is one command.
+    """
+    observer = observer_cpus(cpu_sets)
+    bad, foreign, uninspected = observer_audit.offenders(observer)
+    if uninspected:
+        print(f"warning: {uninspected} task(s) could not be inspected at all, so whether they used "
+              f"a measured core is not recorded", file=sys.stderr)
+    if foreign:
+        print(f"warning: {len(foreign)} process(es) of another user were busy while a thread was "
+              f"allowed outside the observing side and cannot be confined from here; the idle gate "
+              f"is what decides whether the window they touched was clean", file=sys.stderr)
+    if not bad:
+        return
+    free = format_cpu_list(observer).replace(" ", "")
+    lines = [f"ERROR: {len(bad)} process(es) used CPU while a thread was allowed to run outside "
+             f"the observing side ({free}), so they may have run on a measured core and this "
+             f"recording cannot show that it did not:"]
+    lines.append(f"  {'pid':>7s} {'tasks':>5s} {'core%':>6s}  command              allowed")
+    for entry in sorted(bad, key=lambda e: -e["cores"])[:12]:
+        lines.append(f"  {entry['pid']:7d} {entry['tasks']:5d} {100 * entry['cores']:5.1f}%  "
+                     f"{entry['comm'][:20]:20s} {entry['allowed']}")
+    lines.append("Confine them and try again, which is also what to do before any run: "
+                 f"`python3 -m campaign_toolkit.observer_audit --observer {free} --confine`")
+    sys.exit("\n".join(lines))
 
 
 def host_info(profile_name, profiles):
@@ -700,6 +738,7 @@ def main(argv=None, root=None):
     cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
     warn_if_measured_cpus_span_l3_domains(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)
+    require_quiet_observing_side(cpu_sets)
     observer_record = observer_affinity(cpu_sets)
     require_boost_disabled()
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
