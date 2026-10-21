@@ -485,8 +485,11 @@ class FixtureCampaignTest(unittest.TestCase):
         with (mock.patch.object(record_run, 'build', side_effect=explode),
               mock.patch.object(record_run, 'boost_state', return_value={}),
               mock.patch.object(record_run.observer_audit, 'offenders', return_value=(busy, [], 0)),
+              # The CI runner has one L3 domain, so the observing side is empty there and the
+              # audit would correctly stand down; give it a side so the gate itself is tested.
+              mock.patch.object(record_run, 'observer_cpus', return_value={0, 1}),
               mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8})):
-            with self.assertRaisesRegex(SystemExit, 'observer_audit --observer [0-9-]+,[0-9-]+'):
+            with self.assertRaisesRegex(SystemExit, 'observer_audit --observer [0-9,-]+'):
                 record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1',
                                  '--no-publish'], root=self.root)
         self.assertEqual(built, [], 'the build ran before the observing side was checked')

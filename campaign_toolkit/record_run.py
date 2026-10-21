@@ -384,6 +384,11 @@ def require_quiet_observing_side(cpu_sets):
     finding because it is one command.
     """
     observer = observer_cpus(cpu_sets)
+    if not observer:
+        # One L3 domain on the whole machine: there is no side to put the observer on, which
+        # `require_observer_off_measured_cpus` has already recorded as a warning. Auditing against
+        # an empty set would call every process on the machine an offender.
+        return
     bad, foreign, uninspected = observer_audit.offenders(observer)
     if uninspected:
         print(f"warning: {uninspected} task(s) could not be inspected at all, so whether they used "
