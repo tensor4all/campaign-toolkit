@@ -84,7 +84,7 @@ def main(argv=None):
     for c in campaigns:
         root = c['root']
         print(f"== {c['name']}")
-        for cmd in c['record']:
+        for cmd in c.get('record') or []:
             print('  record:', cmd)
             sh(cmd, root)
         if c.get('publish'):
