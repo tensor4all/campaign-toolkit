@@ -101,7 +101,7 @@ class LatestGeneration(unittest.TestCase):
             _stamped(suite / f'{NEW}-mkl-timing-v2.md', '2026-10-20T00:00:00Z')
             other = root / 'result' / 'zen5-cpu' / 'other'
             _stamped(other / f'{OLD}-mkl-timing-v2.md', '2026-10-01T00:00:00Z')
-            _stamped(other / f'cccccccccccc-mkl-timing-v2.md', '2026-10-05T00:00:00Z')
+            _stamped(other / 'cccccccccccc-mkl-timing-v2.md', '2026-10-05T00:00:00Z')
             out = _site(root)
             self.assertIn(f'kern/{NEW}-mkl-timing-v2.md"', out)
             self.assertIn('other/cccccccccccc-mkl-timing-v2.md"', out)
