@@ -149,7 +149,10 @@ def validate(manifest, run_dir):
             if not order or order[-1] != row['row']:
                 order.append(row['row'])
             budget = row['threads']
-            if row.get('rayon_threads') != budget or row.get('vendor_threads') != budget:
+            # `pool_threads` is the harness's pool budget; `rayon_threads` is the historical name
+            # (and what harnesses that still use rayon write).
+            pool = row['pool_threads'] if 'pool_threads' in row else row.get('rayon_threads')
+            if pool != budget or row.get('vendor_threads') != budget:
                 raise ValueError(f'{name}: observed thread budgets differ from requested {budget}')
             if row['status'] == 'ok':
                 values = samples(row, repetitions)

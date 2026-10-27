@@ -150,6 +150,27 @@ class FixtureCampaignTest(unittest.TestCase):
         state = record_run.harness_source_state(d)
         self.assertTrue(state['dirty'] and state['outputs_dirty'])
 
+    def test_moved_check_ignores_outputs_but_sees_source_edits(self):
+        """Between process sets and at the end: outputs are not 'moved', a source edit is."""
+        self._commit_campaign()
+        d = descriptor.load_descriptor(self.root)
+        head = git(self.root, "rev-parse", "HEAD")
+        self.assertFalse(record_run.source_changed(self.root, head, d))
+        # Outputs modified before the recording (the previous arm) and during it.
+        (self.root / "result/INDEX.md").write_text("previous arm\n")
+        self.assertFalse(record_run.source_changed(self.root, head, d))
+        (self.root / "result/INDEX.md").write_text("during the recording\n")
+        self.assertFalse(record_run.source_changed(self.root, head, d))
+        # A source edit mid-run is moved.
+        (self.root / "Cargo.lock").write_text("# edited mid-run\n")
+        self.assertTrue(record_run.source_changed(self.root, head, d))
+        git(self.root, "checkout", "Cargo.lock")
+        self.assertFalse(record_run.source_changed(self.root, head, d))
+        # Other checkouts are still judged over the whole tree, outputs-named paths included.
+        (self.checkout / "README").write_text("edited\n")
+        self.assertTrue(record_run.source_changed(
+            self.checkout, git(self.checkout, "rev-parse", "HEAD"), d))
+
     def test_record_propagates_index_failure_and_honors_no_publish(self):
         original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
         source_csv = self.root / RUN_A_REL / original['result_files'][0]
