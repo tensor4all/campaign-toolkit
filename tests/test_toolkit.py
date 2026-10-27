@@ -117,7 +117,8 @@ class FixtureCampaignTest(unittest.TestCase):
         d = descriptor.load_descriptor(self.root)
         clean = record_run.harness_source_state(d)
         self.assertEqual(clean, {'dirty': False, 'outputs_dirty': False,
-                                 'excluded_outputs': ['data/results', 'result']})
+                                 'excluded_outputs': ['data/results', 'result'],
+                                 'excluded_sibling_outputs': []})
         # The previous recording: a modified index, a new page, a new run directory.
         (self.root / "result/INDEX.md").write_text("index, now with the first arm\n")
         (self.root / "result/fixture-cpu").mkdir()
@@ -149,6 +150,43 @@ class FixtureCampaignTest(unittest.TestCase):
         (self.root / "Cargo.lock").write_text("# changed\n")
         state = record_run.harness_source_state(d)
         self.assertTrue(state['dirty'] and state['outputs_dirty'])
+
+    def _add_sibling(self, data_dir="data/other", result_dir="result-other"):
+        text = (self.root / "benchmarks/campaign.yaml").read_text()
+        text = text.replace("data_dir: data/results", f"data_dir: {data_dir}")
+        text = text.replace("result_dir: result", f"result_dir: {result_dir}")
+        (self.root / "benchmarks/campaign-other.yaml").write_text(text)
+
+    def test_sibling_campaign_outputs_are_not_harness_source(self):
+        """A repo with two descriptors: recording one must not dirty the other's harness."""
+        self._add_sibling()
+        (self.root / "result-other").mkdir()
+        (self.root / "result-other/INDEX.md").write_text("index\n")
+        self._commit_campaign()
+        d = descriptor.load_descriptor(self.root)
+        clean = record_run.harness_source_state(d)
+        self.assertEqual(clean['excluded_outputs'], ['data/results', 'result'])
+        self.assertEqual(clean['excluded_sibling_outputs'], ['data/other', 'result-other'])
+        (self.root / "result-other/INDEX.md").write_text("the sibling's recording\n")
+        (self.root / "result-other/page.md").write_text("page\n")
+        run = self.root / "data/other/run"
+        run.mkdir(parents=True)
+        (run / "run.yaml").write_text("x: 1\n")
+        state = record_run.harness_source_state(d)
+        self.assertFalse(state['dirty'])
+        self.assertFalse(state['outputs_dirty'])  # this campaign's own outputs only
+        (self.root / "Cargo.lock").write_text("# edited\n")
+        self.assertTrue(record_run.harness_source_state(d)['dirty'])
+
+    def test_sibling_output_over_own_source_is_not_excluded(self):
+        """A sibling declaring this campaign's suites as output cannot hide a suite edit."""
+        self._add_sibling(data_dir="benchmarks/suites")
+        self._commit_campaign()
+        d = descriptor.load_descriptor(self.root)
+        self.assertNotIn('benchmarks/suites', record_run.sibling_output_paths(d))
+        path = self.root / SUITE_REL
+        path.write_text(path.read_text() + "# edited\n")
+        self.assertTrue(record_run.harness_source_state(d)['dirty'])
 
     def test_moved_check_ignores_outputs_but_sees_source_edits(self):
         """Between process sets and at the end: outputs are not 'moved', a source edit is."""
