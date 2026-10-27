@@ -8,9 +8,10 @@ the campaign has them, and whatever extra section the campaign passes (a joined
 comparison, for instance).
 
 Latest generation: for each (suite, vendor arm) the one page recorded at the campaign's
-pin on the newest hardware profile. When a (suite, arm) has no page at the pin, its newest
-page is shown and labelled with its revision and date, so the gap is visible. Older pages
-are never linked; they stay in the repository and its history.
+pin on the newest hardware profile. A (suite, arm) with no page at the pin is not linked at
+all: the page names it in one plain line. Older pages are never linked; they stay in the
+repository and its history. A campaign with no pin file has no notion of "at the pin", so
+every (suite, arm) shows its newest page.
 
 It is a view over committed artifacts. It does not measure, and it does not decide
 anything: a page it lists is a page that exists under the site root.
@@ -92,14 +93,16 @@ def _recorded(page):
 
 
 def current_pages(site_root, revisions):
-    """Latest generation: [(page, at_pin, recorded)] one per (suite, arm), sorted by path.
+    """Latest generation: ([page, ...], [missing]) one page per (suite, arm), sorted by path.
 
     Newest profile = the profile of the newest recorded page on the site. Within a
-    (suite, arm) that has pages on it, only that profile is considered; then a page at a
-    pinned revision wins over any other, and the newest recording breaks the remaining tie.
+    (suite, arm) that has pages on it, only that profile is considered; the page at a
+    pinned revision is the one linked, the newest recording breaking a remaining tie. A
+    (suite, arm) with no page at the pin is returned in `missing` as (suite name, arm).
+    With no pinned revision at all, the newest page of each (suite, arm) is linked.
     """
     def at_pin(page):
-        return any(page.name.startswith(rev[:12]) for rev in revisions)
+        return not revisions or any(page.name.startswith(rev[:12]) for rev in revisions)
 
     entries = []
     for page in _pages(site_root):
@@ -109,18 +112,29 @@ def current_pages(site_root, revisions):
         stamp = (_recorded(page), page.stat().st_mtime)
         entries.append((page, (suite, _arm(page)), profile, at_pin(page), stamp))
     if not entries:
-        return []
+        return [], []
     newest_profile = max(entries, key=lambda e: e[4])[2]
     groups = {}
     for entry in entries:
         groups.setdefault(entry[1], []).append(entry)
-    chosen = []
-    for group in groups.values():
-        on_newest = [e for e in group if e[2] == newest_profile]
-        pool = on_newest or group
-        best = max(pool, key=lambda e: (e[3], e[4]))
-        chosen.append((best[0], best[3], best[4][0]))
-    return sorted(chosen, key=lambda c: c[0])
+    chosen, missing = [], []
+    for (suite, arm), group in sorted(groups.items()):
+        pinned = [e for e in group if e[3]]
+        pool = [e for e in pinned if e[2] == newest_profile] or pinned
+        if pool:
+            chosen.append(max(pool, key=lambda e: e[4])[0])
+        else:
+            missing.append((suite[-1] if suite else '', arm))
+    return sorted(chosen), missing
+
+
+def _missing_line(missing):
+    by_suite = {}
+    for suite, arm in missing:
+        by_suite.setdefault(suite, []).append(arm)
+    names = [f"{suite} ({', '.join(a for a in arms if a)})" if any(arms) else suite
+             for suite, arms in sorted(by_suite.items())]
+    return 'Not recorded at the current pin: ' + ', '.join(names)
 
 
 def _charts(site_root):
@@ -156,27 +170,19 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
         root = root.parent
     blob = _blob_base(root)
     revisions = _pin_revisions(root, pins)
-    pages = current_pages(site_root, revisions)
+    pages, missing = current_pages(site_root, revisions)
     charts = _charts(site_root)
 
     items = []
-    for page, at_pin, recorded in pages:
+    for page in pages:
         rel = page.relative_to(site_root)
         if 'github.com' in blob:
             href = f'{blob}/blob/{repo_ref}/{page.relative_to(root)}'
             note = ' <span class="muted">(Markdown, rendered by GitHub)</span>'
         else:
             href, note = str(rel), ''
-        mark = ''
-        if not at_pin:
-            rev = _REV_PREFIX.match(page.name + '-')
-            rev = rev.group(0)[:12] if rev else page.name
-            date = recorded[:10] or 'date not recorded'
-            pinned = ', '.join(r[:12] for r in revisions) or 'none'
-            mark = (f' <strong>not at the pinned revision</strong> <span class="muted">(revision '
-                    f'<code>{html.escape(rev)}</code>, recorded {html.escape(date)}; pin is '
-                    f'<code>{html.escape(pinned)}</code>)</span>')
-        items.append(f'<li><a href="{html.escape(href)}">{html.escape(str(rel))}</a>{note}{mark}</li>')
+        items.append(f'<li><a href="{html.escape(href)}">{html.escape(str(rel))}</a>{note}</li>')
+    missing_html = f'<p class="muted">{html.escape(_missing_line(missing))}</p>' if missing else ''
 
     heading = title or 'Benchmark results'
     intro = intro or ('The latest generation of results: for each suite and vendor arm, the page '
@@ -192,6 +198,7 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
 {extra_html}
 {chart_grid(site_root, charts, blob, repo_ref, root)}
 <h2>Pages</h2><ul>{''.join(items) or '<li class="muted">no pages yet</li>'}</ul>
+{missing_html}
 </body></html>
 """)
     print(f'wrote {site_root / "index.html"} ({len(pages)} pages, {len(charts)} charts)')

@@ -95,20 +95,19 @@ class LatestGeneration(unittest.TestCase):
             self.assertIn(f'{NEW}-openblas-timing-v2.md"', out)
             self.assertNotIn(OLD, out)
 
-    def test_no_page_at_the_pin_shows_newest_with_revision_label(self):
+    def test_no_page_at_the_pin_is_named_not_linked(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, suite = _campaign(tmp, NEW)
             _stamped(suite / f'{NEW}-mkl-timing-v2.md', '2026-10-20T00:00:00Z')
             other = root / 'result' / 'zen5-cpu' / 'other'
             _stamped(other / f'{OLD}-mkl-timing-v2.md', '2026-10-01T00:00:00Z')
-            _stamped(other / 'cccccccccccc-mkl-timing-v2.md', '2026-10-05T00:00:00Z')
+            _stamped(other / 'cccccccccccc-openblas-timing-v2.md', '2026-10-05T00:00:00Z')
             out = _site(root)
             self.assertIn(f'kern/{NEW}-mkl-timing-v2.md"', out)
-            self.assertIn('other/cccccccccccc-mkl-timing-v2.md"', out)
+            self.assertNotIn('other/', out.replace('Not recorded at the current pin: other (mkl, openblas)', ''))
             self.assertNotIn(OLD, out)
-            self.assertIn('not at the pinned revision', out)
-            self.assertIn('<code>cccccccccccc</code>, recorded 2026-10-05', out)
-            self.assertEqual(out.count('not at the pinned revision'), 1)
+            self.assertNotIn('cccccccccccc', out)
+            self.assertIn('Not recorded at the current pin: other (mkl, openblas)', out)
 
 
 if __name__ == '__main__':
