@@ -243,6 +243,15 @@
           "type": "string",
           "minLength": 1
         },
+        "outputs_dirty": {
+          "type": "boolean",
+          "description": "The recorder's own output locations (`excluded_outputs`) held uncommitted changes. They are not harness source, so `dirty` ignores them."
+        },
+        "excluded_outputs": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Campaign-relative paths left out of the `dirty` check: the results root, the result pages directory and the index, as the descriptor declares them."
+        },
         "dirty": {
           "type": [
             "boolean",

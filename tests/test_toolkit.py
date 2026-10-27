@@ -102,6 +102,54 @@ class FixtureCampaignTest(unittest.TestCase):
         (self.checkout / 'untracked-source').write_text('dirty\n')
         self.assertTrue(record_run.toolkit_identity(self.checkout)['dirty'])
 
+    def _commit_campaign(self):
+        (self.root / ".gitignore").write_text("extern/\ntarget/\n")
+        (self.root / "Cargo.lock").write_text("# lock\n")
+        (self.root / "result").mkdir(exist_ok=True)
+        (self.root / "result/INDEX.md").write_text("index\n")
+        git(self.root, "init", "-q")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "campaign")
+
+    def test_recorders_own_outputs_are_not_harness_source(self):
+        """A recipe's second recording must not be refused for the first one's published pages."""
+        self._commit_campaign()
+        d = descriptor.load_descriptor(self.root)
+        clean = record_run.harness_source_state(d)
+        self.assertEqual(clean, {'dirty': False, 'outputs_dirty': False,
+                                 'excluded_outputs': ['data/results', 'result']})
+        # The previous recording: a modified index, a new page, a new run directory.
+        (self.root / "result/INDEX.md").write_text("index, now with the first arm\n")
+        (self.root / "result/fixture-cpu").mkdir()
+        (self.root / "result/fixture-cpu/page.md").write_text("page\n")
+        run = self.root / "data/results/fixture-cpu/fixture-kernels/20270101T000000Z"
+        run.mkdir(parents=True)
+        (run / "run.yaml").write_text("x: 1\n")
+        state = record_run.harness_source_state(d)
+        self.assertFalse(state['dirty'])
+        self.assertTrue(state['outputs_dirty'])
+        # A modified tracked output under data/ (not just new files) is an output too.
+        git(self.root, "add", "-f", "data/results")
+        git(self.root, "commit", "-q", "-m", "run")
+        (run / "run.yaml").write_text("x: 2\n")
+        self.assertFalse(record_run.harness_source_state(d)['dirty'])
+
+    def test_harness_source_changes_are_still_dirty(self):
+        self._commit_campaign()
+        d = descriptor.load_descriptor(self.root)
+        for rel in ("Cargo.lock", SUITE_REL):
+            path = self.root / rel
+            original = path.read_text()
+            path.write_text(original + "# edited\n")
+            self.assertTrue(record_run.harness_source_state(d)['dirty'], rel)
+            path.write_text(original)
+            self.assertFalse(record_run.harness_source_state(d)['dirty'], rel)
+        # Edited source together with a dirty output is still dirty.
+        (self.root / "result/INDEX.md").write_text("changed\n")
+        (self.root / "Cargo.lock").write_text("# changed\n")
+        state = record_run.harness_source_state(d)
+        self.assertTrue(state['dirty'] and state['outputs_dirty'])
+
     def test_record_propagates_index_failure_and_honors_no_publish(self):
         original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
         source_csv = self.root / RUN_A_REL / original['result_files'][0]
