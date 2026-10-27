@@ -230,12 +230,35 @@ def data_markdown(family, family_spec, series, cells_by_engine, budgets, dtype='
     return '\n'.join(lines) + '\n'
 
 
-def page_markdown(config, families, budgets, dtype='f64'):
+def revisions_line(run_dirs, labels=None):
+    """One line naming, per run, its role, vendor arm and the revisions it was measured at, read from
+    each run's `run.yaml`; a `None` entry is a run that does not exist and is named as missing."""
+    parts, missing = [], []
+    for index, run_dir in enumerate(run_dirs):
+        if run_dir is None:
+            missing.append((labels[index] if labels and index < len(labels) else f'run {index}'))
+            continue
+        manifest = yaml.safe_load((Path(run_dir) / 'run.yaml').read_text())
+        role = 'large tier' if 'large' in str(manifest.get('suite_id', '')) else 'daily'
+        short = lambda block: str((manifest.get(block) or {}).get('commit') or 'none')[:7]  # noqa: E731
+        parts.append(f'{role} {manifest.get("vendor", {}).get("name", "?")}: fork `{short("library")}`, '
+                     f'upstream `{short("upstream")}`, harness `{short("harness")}`')
+    line = 'Revisions: ' + '; '.join(parts) + '.'
+    if missing:
+        line += (' No run was given for ' + ', '.join(missing) + ' (none recorded at this fork revision, and '
+                 'an older recording is not mixed in), so the series that would use it stops at the sizes '
+                 'of its other run.')
+    return line
+
+
+def page_markdown(config, families, budgets, dtype='f64', revisions=None):
     """The page that links the charts: a table of contents, then one section per family."""
     page = config.get('page', {})
     version = config.get('version', 'v1')
     lines = [f'# {page.get("title", "Throughput charts")}', '']
     lines += [line for line in page.get('notes', [])]
+    if revisions:
+        lines.append(revisions)
     lines += ['', '## Contents', '',
               '| family (chart, data) | nominal flops |', '|---|---|']
     for family in families:
@@ -254,7 +277,9 @@ def write_report(run_dirs, config, out_dir, budgets=(1, 4, 8), dtype='f64', orde
     """Write `throughput-<family>-<version>.svg` and `.md` for every family in the config."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    cells_by_run = [load_run(run_dir, dtype=dtype, order=order) for run_dir in run_dirs]
+    # A run that was not recorded is `None`: its cells are empty and the page says so.
+    cells_by_run = [load_run(run_dir, dtype=dtype, order=order) if run_dir is not None else {}
+                    for run_dir in run_dirs]
     # A series may name several runs (a daily suite and the large-tier suite, say): the cells are
     # merged, and a size measured in both keeps the later run's value.
     cells_by_series = {}
@@ -273,5 +298,7 @@ def write_report(run_dirs, config, out_dir, budgets=(1, 4, 8), dtype='f64', orde
         (out_dir / f'throughput-{family}-{version}.md').write_text(
             data_markdown(family, family_spec, config['series'], cells_by_series, budgets, dtype))
         written.append(family)
-    (out_dir / 'README.md').write_text(page_markdown(config, written, budgets, dtype))
+    (out_dir / 'README.md').write_text(page_markdown(
+        config, written, budgets, dtype,
+        revisions_line(run_dirs, config.get('page', {}).get('run_labels'))))
     return written, dropped
