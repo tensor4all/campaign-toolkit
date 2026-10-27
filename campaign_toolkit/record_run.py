@@ -325,6 +325,41 @@ def toolkit_identity(root):
             'measured_path': str(root)}
 
 
+def recorder_output_paths(d):
+    """The campaign-relative paths this campaign's recorder and publisher write, from its descriptor.
+
+    A recording writes its run directory under `data_dir`, and publishing it writes the page and the
+    index under `result_dir` (and `index_path`, should a descriptor place the index elsewhere).
+    These are outputs of the previous recording, not harness source: a recipe that records several
+    arms in a row would otherwise refuse its own second arm.
+    """
+    paths = []
+    for p in (d.data_dir, d.result_dir, d.index_path):
+        try:
+            rel = pathlib.Path(p).resolve().relative_to(d.root.resolve()).as_posix()
+        except ValueError:
+            continue  # outside the campaign repo: git does not see it
+        if rel not in ('', '.') and rel not in paths:
+            paths.append(rel)
+    # A path inside another excluded path adds nothing.
+    return [x for x in paths if not any(x != y and x.startswith(y + '/') for y in paths)]
+
+
+def harness_source_state(d):
+    """`dirty`: tracked harness source differs from HEAD, ignoring the recorder's own outputs.
+
+    Everything else (code, Cargo.lock, suites, pins, scripts) still counts. `outputs_dirty` says
+    whether the excluded output locations were themselves modified or new, and
+    `excluded_outputs` names the pathspecs left out, so a manifest says why a run is clean source.
+    """
+    excluded = recorder_output_paths(d)
+    specs = [f':(exclude){x}' for x in excluded]
+    dirty = bool(git(d.root, 'status', '--porcelain', '--untracked-files=no', '--', '.', *specs))
+    outputs_dirty = bool(excluded) and bool(git(d.root, 'status', '--porcelain', '--untracked-files=normal',
+                                                '--', *excluded))
+    return {'dirty': dirty, 'outputs_dirty': outputs_dirty, 'excluded_outputs': excluded}
+
+
 def build_features(suite, arm, d):
     """The cargo feature list the build is invoked with.
 
@@ -749,8 +784,7 @@ def main(argv=None, root=None):
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')
     toolkit = None
-    harness = {'commit': git(d.root, 'rev-parse', 'HEAD'),
-               'dirty': bool(git(d.root, 'status', '--porcelain', '--untracked-files=no'))}
+    harness = {'commit': git(d.root, 'rev-parse', 'HEAD'), **harness_source_state(d)}
     if v2:
         if args.reps < 2 or args.aa < 2 or not engines or args.aa % len(engines):
             sys.exit('ERROR: v2 needs >=2 calls, >=2 process sets and complete engine-order rotation cycles')
