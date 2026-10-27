@@ -9,14 +9,15 @@ comparison, for instance).
 
 Latest generation: for each (suite, vendor arm) the one page recorded at the campaign's
 pin on the newest hardware profile. A (suite, arm) with no page at the pin is not linked at
-all: the page names it in one plain line. Older pages are never linked; they stay in the
-repository and its history. A campaign with no pin file has no notion of "at the pin", so
+all: the page names it in one plain line. Older pages are never linked from the landing
+page; its one link to them is `history.html` (see `history_pages`). A campaign with no pin file has no notion of "at the pin", so
 every (suite, arm) shows its newest page.
 
 It is a view over committed artifacts. It does not measure, and it does not decide
 anything: a page it lists is a page that exists under the site root.
 """
 import argparse
+import datetime
 import html
 import pathlib
 import re
@@ -128,6 +129,137 @@ def current_pages(site_root, revisions):
     return sorted(chosen), missing
 
 
+def _is_record(rel):
+    """Whether a path (relative to the site root) is a record page: the same filter as `_pages`,
+    plus the comparison HTML pages."""
+    path = pathlib.PurePosixPath(rel)
+    if 'throughput' in path.parts or path.name in ('INDEX.md', 'README.md'):
+        return False
+    if path.name.startswith(('index', 'history')):
+        return False
+    return path.suffix == '.md' or (path.suffix == '.html' and 'comparison' in path.name)
+
+
+def _publication_commits(root, site_rel):
+    """[(sha, epoch, subject)] newest first: first-parent commits that touched the site root."""
+    out = _git(root, 'log', '--first-parent', '--format=%H%x09%ct%x09%s', '--', site_rel)
+    commits = []
+    for line in out.splitlines():
+        sha, epoch, subject = line.split('\t', 2)
+        commits.append((sha, int(epoch), subject))
+    return commits
+
+
+def _records_at(root, sha, site_rel):
+    """{path relative to the repository root: blob id} of the record pages at a commit."""
+    out = subprocess.run(['git', '-C', str(root), 'ls-tree', '-r', '-z', sha, '--', site_rel],
+                         capture_output=True, text=True).stdout
+    records = {}
+    for entry in out.split('\0'):
+        if not entry:
+            continue
+        meta, path = entry.split('\t', 1)
+        if _is_record(pathlib.PurePosixPath(path).relative_to(site_rel).as_posix()):
+            records[path] = meta.split()[2]
+    return records
+
+
+def _pins_at(root, sha):
+    names = _git(root, 'ls-tree', '--name-only', sha, 'pins/').splitlines()
+    pins = []
+    for name in names:
+        if not name.endswith('.rev'):
+            continue
+        for line in _git(root, 'show', f'{sha}:{name}').splitlines():
+            line = line.strip()
+            if line and not line.startswith('#'):
+                pins.append((pathlib.PurePosixPath(name).stem, line[:12]))
+                break
+    return pins
+
+
+def history_pages(root, site_rel):
+    """[{sha, epoch, subject, pins, records, new, removed}] newest first.
+
+    Only commits that added, changed or removed a record page are kept: a commit that touched
+    the site root without changing a record (a chart, an index) has nothing to list.
+    """
+    commits = _publication_commits(root, site_rel)
+    states = [_records_at(root, sha, site_rel) for sha, _, _ in commits]
+    entries = []
+    for i, (sha, epoch, subject) in enumerate(commits):
+        before = states[i + 1] if i + 1 < len(commits) else {}
+        now = states[i]
+        new = {p for p, blob in now.items() if before.get(p) != blob}
+        removed = set(before) - set(now)
+        if new or removed:
+            entries.append(dict(sha=sha, epoch=epoch, subject=subject, pins=_pins_at(root, sha),
+                                records=sorted(now), new=new, removed=removed))
+    return entries
+
+
+def _record_link(blob, sha, path, site_rel):
+    rel = pathlib.PurePosixPath(path).relative_to(site_rel).as_posix()
+    return f'<li><a href="{html.escape(blob)}/blob/{sha}/{html.escape(path)}">{html.escape(rel)}</a></li>'
+
+
+def _group_by_suite(paths, site_rel):
+    groups = {}
+    for path in paths:
+        parts = pathlib.PurePosixPath(path).relative_to(site_rel).parts
+        suite = '/'.join(parts[:-3] + parts[-2:-1]) if len(parts) >= 3 else '/'.join(parts[:-1])
+        groups.setdefault(suite or '.', []).append(path)
+    return sorted(groups.items())
+
+
+def _record_lists(blob, sha, paths, site_rel):
+    return ''.join(
+        f'<p class="muted">{html.escape(suite)} ({len(group)})</p><ul>'
+        + ''.join(_record_link(blob, sha, p, site_rel) for p in group) + '</ul>'
+        for suite, group in _group_by_suite(paths, site_rel))
+
+
+def write_history(root, site_root, title):
+    """Write `<site_root>/history.html`; returns its path, or None with no publication history."""
+    site_rel = site_root.relative_to(root).as_posix()
+    blob = _blob_base(root)
+    entries = history_pages(root, site_rel)
+    if not entries:
+        return None
+    sections = []
+    for e in entries:
+        sha = e['sha']
+        when = datetime.datetime.fromtimestamp(e['epoch'], datetime.timezone.utc)
+        pins = ''.join(f' <span class="muted">{html.escape(n)} <code>{html.escape(r)}</code></span>'
+                       for n, r in e['pins'])
+        carried = [p for p in e['records'] if p not in e['new']]
+        parts = [f'<h2>{when:%Y-%m-%d %H:%M} UTC '
+                 f'<a href="{html.escape(blob)}/commit/{sha}"><code>{sha[:10]}</code></a></h2>',
+                 f'<p>{html.escape(e["subject"])}{pins}</p>']
+        if e['new']:
+            parts.append(f'<p><strong>New or changed ({len(e["new"])})</strong></p>'
+                         + _record_lists(blob, sha, sorted(e['new']), site_rel))
+        if e['removed']:
+            parts.append(f'<p class="muted">Removed in this commit: {len(e["removed"])} page(s).</p>')
+        if carried:
+            parts.append(f'<details><summary>Carried over ({len(carried)})</summary>'
+                         + _record_lists(blob, sha, carried, site_rel) + '</details>')
+        sections.append('\n'.join(parts))
+    out = site_root / 'history.html'
+    out.write_text(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}: history</title>
+<style>{CSS}</style></head><body>
+<h1>History of published records</h1>
+<p class="muted">Each entry is a publication commit on the main branch, newest first, with the
+records present at that commit. Links are permanent: they point at the commit.
+<a href="index.html">Back to the current results</a>.</p>
+{''.join(sections)}
+</body></html>
+""")
+    print(f'wrote {out} ({len(entries)} publication commits)')
+    return out
+
+
 def _missing_line(missing):
     by_suite = {}
     for suite, arm in missing:
@@ -186,14 +318,16 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
 
     heading = title or 'Benchmark results'
     intro = intro or ('The latest generation of results: for each suite and vendor arm, the page '
-                      'recorded at the pinned revision. Earlier recordings are not listed here; they '
-                      'stay in the git history of this repository.')
+                      'recorded at the pinned revision.')
+    history = write_history(root, site_root, title or 'Benchmark results')
+    history_link = '<p><a href="history.html">History of published records</a></p>' if history else ''
     pin_lines = ''.join(f'<li>pinned revision: <code>{html.escape(rev)}</code></li>' for rev in revisions)
     (site_root / 'index.html').write_text(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>{html.escape(heading)}</title>
 <style>{CSS}</style></head><body>
 <h1>{html.escape(heading)}</h1>
 <p>{intro}</p>
+{history_link}
 <ul>{pin_lines}</ul>
 {extra_html}
 {chart_grid(site_root, charts, blob, repo_ref, root)}

@@ -110,5 +110,51 @@ class LatestGeneration(unittest.TestCase):
             self.assertIn('Not recorded at the current pin: other (mkl, openblas)', out)
 
 
+def _commit(root, message, when):
+    env = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@x', 'GIT_COMMITTER_NAME': 't',
+           'GIT_COMMITTER_EMAIL': 't@x', 'GIT_AUTHOR_DATE': when, 'GIT_COMMITTER_DATE': when,
+           'PATH': '/usr/bin:/bin'}
+    subprocess.run(['git', '-C', str(root), 'add', '-A'], check=True)
+    subprocess.run(['git', '-C', str(root), '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message],
+                   check=True, env=env)
+    return subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+
+class History(unittest.TestCase):
+    def test_history_page_and_single_landing_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, suite = _campaign(tmp, NEW)
+            _stamped(suite / f'{OLD}-mkl-timing-v2.md', '2026-10-01T00:00:00Z')
+            _stamped(suite / f'{OLD}-openblas-timing-v2.md', '2026-10-01T00:00:00Z')
+            sha1 = _commit(root, 'first record', '2026-10-01T12:34:00+00:00')
+            (root / 'README.txt').write_text('unrelated')
+            _commit(root, 'unrelated', '2026-10-05T00:00:00+00:00')
+            (suite / f'{OLD}-openblas-timing-v2.md').unlink()
+            _stamped(suite / f'{NEW}-mkl-timing-v2.md', '2026-10-20T00:00:00Z')
+            sha2 = _commit(root, 'second record', '2026-10-20T08:00:00+00:00')
+            out = _site(root)
+            hist = (root / 'result' / 'history.html').read_text()
+            self.assertEqual(out.count('history.html'), 1)
+            self.assertIn('History of published records', out)
+            self.assertNotIn(OLD, out)
+            self.assertEqual(hist.count('<h2>'), 2)
+            self.assertLess(hist.index(sha2[:10]), hist.index(sha1[:10]))
+            self.assertIn('2026-10-01 12:34 UTC', hist)
+            self.assertIn('first record', hist)
+            self.assertNotIn('unrelated', hist)
+            self.assertIn(f'<code>{NEW}</code>', hist)  # pin read at the commit
+            base = 'https://github.com/org/camp'
+            rel = 'result/zen5-cpu/kern'
+            gone = f'{OLD}-openblas-timing-v2.md'
+            self.assertIn(f'{base}/blob/{sha1}/{rel}/{gone}', hist)
+            self.assertNotIn(f'{base}/blob/{sha2}/{rel}/{gone}', hist)
+            self.assertEqual(hist.count(f'/{gone}"'), 1)
+            self.assertIn(f'{base}/blob/{sha2}/{rel}/{NEW}-mkl-timing-v2.md', hist)
+            self.assertIn(f'{base}/blob/{sha2}/{rel}/{OLD}-mkl-timing-v2.md', hist)  # carried over
+            self.assertIn('<details>', hist)
+            self.assertIn(f'{base}/commit/{sha2}', hist)
+
+
 if __name__ == '__main__':
     unittest.main()
