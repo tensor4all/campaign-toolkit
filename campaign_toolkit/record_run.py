@@ -720,6 +720,68 @@ def protocol_script(checkout, name):
     return base / name
 
 
+def _remote_git(directory, *args):
+    return subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True)
+
+
+def commit_on_remote(directory, commit, identity="library"):
+    """(ok, why): whether `commit` is reachable from something the remote publishes.
+
+    Local validation resolves a commit in the local checkout, so a commit that exists only there
+    (a TEMP control commit, a branch that was reset away, a never-pushed branch) validates here and
+    cannot be resolved by CI, which clones from GitHub. This asks the remote itself: after a fresh
+    fetch the commit has to be an ancestor of a `refs/remotes/<remote>/*` ref or of a tag the
+    remote lists. A checkout without `origin` is refused, except an upstream reference, which may
+    be resolved by a release tag on whatever remote it has.
+    """
+    remotes = _remote_git(directory, "remote").stdout.split()
+    if "origin" in remotes:
+        remote = "origin"
+    elif identity == "upstream" and remotes:
+        remote = remotes[0]
+    else:
+        return False, "the checkout has no 'origin' remote"
+    fetch = _remote_git(directory, "fetch", "--quiet", "--prune", "--tags", remote)
+    if fetch.returncode != 0:
+        return False, (f"`git fetch {remote}` failed, so availability cannot be verified "
+                       f"({fetch.stderr.strip() or 'no output'})")
+    contains = _remote_git(directory, "for-each-ref", "--contains", commit,
+                           f"refs/remotes/{remote}/")
+    if contains.returncode == 0 and contains.stdout.strip() and remote == "origin":
+        return True, ""
+    listed = _remote_git(directory, "ls-remote", "--tags", remote)
+    if listed.returncode != 0:
+        return False, f"`git ls-remote --tags {remote}` failed ({listed.stderr.strip()})"
+    for line in listed.stdout.splitlines():
+        ref = line.split("\t")[-1].removesuffix("^{}")
+        if not ref.startswith("refs/tags/"):
+            continue
+        r = _remote_git(directory, "merge-base", "--is-ancestor", commit, ref)
+        if r.returncode == 0:
+            return True, ""
+    return False, f"it is not an ancestor of any branch or tag on '{remote}'"
+
+
+def require_commits_on_remote(sources, label=None):
+    """Refuse, before building or timing, a recorded source commit its remote does not have.
+
+    `sources` is a list of (name, directory, identity). The commit is the checkout's HEAD, which
+    is what the manifest will record.
+    """
+    for name, directory, identity in sources:
+        head = _remote_git(directory, "rev-parse", "HEAD")
+        if head.returncode != 0:
+            sys.exit(f"ERROR: cannot read HEAD of the {name} checkout {directory}: {head.stderr.strip()}")
+        commit = head.stdout.strip()
+        ok, why = commit_on_remote(directory, commit, identity)
+        if not ok:
+            sys.exit(f"ERROR: the {name} checkout {directory} is at {commit}, which is not available "
+                     f"on its remote: {why}. A run recorded against a local-only commit passes "
+                     f"local validation and fails in CI. Push the branch, or tag it as "
+                     f"evidence/{label or '<run label>'} and push the tag (or pass "
+                     f"--allow-local-commits for a throwaway probe, which can never be published).")
+
+
 def main(argv=None, root=None):
     if root is not None:
         descriptor.set_root(root)
@@ -763,6 +825,9 @@ def main(argv=None, root=None):
     ap.add_argument("--label", default=None, help="suffix for the run directory")
     ap.add_argument('--no-publish', action='store_true',
                     help='retain and validate run artifacts without publishing a result page')
+    ap.add_argument('--allow-local-commits', action='store_true',
+                    help='for a throwaway probe: do not require the recorded source commits to exist '
+                         'on their remotes. The manifest records it and the run is never published.')
     args = ap.parse_args(argv)
 
     profiles = d.profiles()
@@ -837,6 +902,20 @@ def main(argv=None, root=None):
         toolkit = toolkit_identity(toolkit_root)
         if toolkit['dirty'] or harness['dirty']:
             sys.exit('ERROR: v2 requires clean, committed toolkit and harness source')
+    # Before the lock, the build and any timing: every source commit the manifest will record has
+    # to be one CI can fetch. The harness's own outputs are committed afterwards, which is fine;
+    # what is checked is the source commit.
+    if not args.allow_local_commits:
+        remote_sources = [('library', pathlib.Path(args.checkout), 'library'),
+                          ('harness', d.root, 'harness')]
+        if d.has_upstream:
+            remote_sources.append(('upstream', pathlib.Path(args.upstream), 'upstream'))
+        if v2:
+            remote_sources.append(('toolkit', toolkit_root, 'toolkit'))
+        require_commits_on_remote(remote_sources, args.label)
+    else:
+        print('warning: --allow-local-commits: recorded commits may exist only locally; this run '
+              'will not be published', file=sys.stderr)
 
     # One measurement at a time, and no build while a measurement runs. Taken
     # before the build and held for the whole run.
@@ -1071,6 +1150,7 @@ def main(argv=None, root=None):
         **({"upstream": upstream_block} if upstream_block else {}),
         **({"vendor": vendor_record} if vendor_record else {}),
         "harness": harness,
+        **({"local_commits_allowed": True} if args.allow_local_commits else {}),
         **({'toolkit': toolkit, 'verification_files': verification_files,
             'binary': {'path': str(binary), 'sha256': binary_sha256}} if v2 else {}),
         "host": host_info(args.profile, profiles),
@@ -1133,7 +1213,7 @@ def main(argv=None, root=None):
                    env=dict(os.environ, CAMPAIGN_ROOT=str(d.root)),
                    cwd=str(pathlib.Path(__file__).resolve().parent.parent), check=True)
     code = 0
-    if not args.no_publish:
+    if not (args.no_publish or args.allow_local_commits):
         code = descriptor.run_module("publish_report", [str(run_dir)], root=d.root).returncode
     lock.close()
     return code

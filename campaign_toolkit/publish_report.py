@@ -44,6 +44,9 @@ def publish(run_dir):
     _suite_file, suite = find_suite(manifest["suite_id"])
     if suite is None:
         sys.exit(f"ERROR: {manifest['suite_id']!r} has no declaration; nothing to publish against")
+    if manifest.get("local_commits_allowed"):
+        sys.exit(f"ERROR: {run_dir}/run.yaml was recorded with --allow-local-commits: a commit it "
+                 f"records may exist only locally, so the run is a probe and is never published")
     # The recorder validates before it publishes, but a hand-run publication has to meet the same
     # bar: publishing is what makes a number citable, so it is not a step that may skip the gate.
     check = descriptor.run_module("validate_run", [str(run_dir / "run.yaml")],

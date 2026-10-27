@@ -231,6 +231,10 @@
         }
       }
     },
+    "local_commits_allowed": {
+      "type": "boolean",
+      "description": "Present (true) only when the run was recorded with `--allow-local-commits`: a source commit it records may exist only in a local checkout, so CI cannot resolve it. Such a run is a throwaway probe and `publish_report` refuses to publish it."
+    },
     "harness": {
       "type": "object",
       "required": [
