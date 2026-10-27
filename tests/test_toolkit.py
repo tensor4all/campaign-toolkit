@@ -17,6 +17,7 @@ import sys
 import time
 import tempfile
 import unittest
+import yaml
 from unittest import mock
 
 TOOLKIT = pathlib.Path(__file__).resolve().parent.parent
@@ -73,9 +74,62 @@ class FixtureCampaignTest(unittest.TestCase):
         patcher = mock.patch.object(record_run, 'ancestor_processes', return_value=[])
         patcher.start()
         self.addCleanup(patcher.stop)
+        # The fixture's checkouts have no remote; the remote-availability guard has its own tests
+        # with real bare origins (RemoteCommitGuardTest), and is held at "passes" here.
+        guard = mock.patch.object(record_run, 'require_commits_on_remote')
+        self.remote_guard = guard.start()
+        self.addCleanup(guard.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_allow_local_commits_is_recorded_skips_guard_and_never_publishes(self):
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+        modules = []
+
+        def child(module, args, **kwargs):
+            modules.append(module)
+            return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+
+        def process(args, **kwargs):
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            elif 'campaign_toolkit.report_run' in args:
+                directory = pathlib.Path(args[args.index('--run-dir') + 1])
+                (directory / 'report.md').write_text('probe\n')
+            return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
+
+        with (mock.patch.object(record_run, 'build', return_value=pin),
+              mock.patch.object(record_run, 'boost_state', return_value={}),
+              mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
+                                original['library']['commit'] if args[0] == 'rev-parse' else ''),
+              mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
+              mock.patch.object(record_run, 'vendor_identity', return_value={'vendor.name': 'openblas'}),
+              mock.patch.object(record_run, 'host_info', return_value=original['host']),
+              mock.patch.object(record_run.subprocess, 'run', side_effect=process),
+              mock.patch.object(descriptor, 'run_module', side_effect=child)):
+            code = record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1', '--label', 'probe',
+                                    '--allow-local-commits'], root=self.root)
+        self.assertEqual(code, 0)
+        self.remote_guard.assert_not_called()
+        self.assertNotIn('publish_report', modules)
+        runs = sorted((self.root / RUN_A_REL).parent.glob('*-probe'))
+        manifest = campaign.load(runs[-1] / 'run.yaml')
+        self.assertIs(manifest['local_commits_allowed'], True)
+
+    def test_publish_refuses_a_local_commits_run(self):
+        run_dir = self.root / RUN_A_REL
+        manifest = yaml.safe_load((run_dir / 'run.yaml').read_text())
+        manifest['local_commits_allowed'] = True
+        (run_dir / 'run.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
+        with self.assertRaises(SystemExit) as raised:
+            publish_report.publish(run_dir)
+        self.assertIn('allow-local-commits', str(raised.exception))
 
     def test_descriptor_loads(self):
         d = descriptor.load_descriptor(self.root)
@@ -1130,3 +1184,73 @@ class PublishPrFlowTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemoteCommitGuardTest(unittest.TestCase):
+    """The recorder refuses a source commit its remote cannot supply, using local bare origins."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = pathlib.Path(self.tmp.name)
+        self.origin = base / "origin.git"
+        git(base, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.work = base / "work"
+        git(base, "clone", "-q", str(self.origin), str(self.work))
+        git(self.work, "checkout", "-q", "-b", "main")
+        (self.work / "f").write_text("1\n")
+        git(self.work, "add", "f")
+        git(self.work, "commit", "-q", "-m", "one")
+        git(self.work, "push", "-q", "origin", "main")
+
+    def commit_local(self, text="2\n"):
+        (self.work / "f").write_text(text)
+        git(self.work, "commit", "-q", "-am", "local")
+        return git(self.work, "rev-parse", "HEAD")
+
+    def check(self, identity="library"):
+        record_run.require_commits_on_remote([("library", self.work, identity)], "probe")
+
+    def test_pushed_commit_passes(self):
+        self.check()
+
+    def test_unpushed_commit_is_refused_naming_checkout_commit_and_fix(self):
+        commit = self.commit_local()
+        with self.assertRaises(SystemExit) as raised:
+            self.check()
+        message = str(raised.exception)
+        self.assertIn(commit, message)
+        self.assertIn(str(self.work), message)
+        self.assertIn("evidence/probe", message)
+
+    def test_commit_reachable_only_through_a_pushed_tag_passes(self):
+        self.commit_local()
+        git(self.work, "tag", "evidence/probe")
+        with self.assertRaises(SystemExit):
+            self.check()                        # a local-only tag is not on the remote
+        git(self.work, "push", "-q", "origin", "evidence/probe")
+        self.check()
+
+    def test_a_branch_reset_away_after_push_is_refused(self):
+        self.commit_local()
+        git(self.work, "push", "-q", "origin", "main")
+        self.check()
+        git(self.work, "push", "-q", "--force", "origin", "HEAD~1:main")
+        with self.assertRaises(SystemExit):
+            self.check()
+
+    def test_checkout_without_origin_is_refused_but_upstream_with_a_release_tag_passes(self):
+        git(self.work, "remote", "remove", "origin")
+        with self.assertRaises(SystemExit) as raised:
+            self.check()
+        self.assertIn("origin", str(raised.exception))
+        git(self.work, "remote", "add", "up", str(self.origin))
+        git(self.work, "tag", "v1")
+        git(self.work, "push", "-q", "up", "v1")
+        self.check("upstream")
+
+    def test_fetch_failure_is_refused(self):
+        git(self.work, "remote", "set-url", "origin", str(self.origin) + ".gone")
+        with self.assertRaises(SystemExit) as raised:
+            self.check()
+        self.assertIn("fetch", str(raised.exception))
