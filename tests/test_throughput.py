@@ -37,5 +37,21 @@ class LayoutTest(unittest.TestCase):
         self.assertAlmostEqual(cplx, 4 * real, places=6)
 
 
+class RevisionsLineTest(unittest.TestCase):
+    def test_names_role_vendor_and_revisions_and_the_missing_run(self):
+        import tempfile
+        import yaml
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            (run / 'run.yaml').write_text(yaml.safe_dump({
+                'suite_id': 'faer-kernels-large', 'vendor': {'name': 'mkl'},
+                'library': {'commit': 'a' * 40}, 'upstream': {'commit': 'b' * 40},
+                'harness': {'commit': 'c' * 40}}))
+            line = throughput.revisions_line([run, None], ['large mkl', 'large openblas'])
+        self.assertIn('large tier mkl: fork `aaaaaaa`, upstream `bbbbbbb`, harness `ccccccc`', line)
+        self.assertIn('No run was given for large openblas', line)
+
+
 if __name__ == '__main__':
     unittest.main()
