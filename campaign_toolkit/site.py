@@ -38,7 +38,11 @@ def _git(root, *args):
 
 def _blob_base(root):
     remote = _git(root, 'remote', 'get-url', 'origin')
-    return remote.removesuffix('.git').replace('git@github.com:', 'https://github.com:')
+    remote = remote.removesuffix('.git')
+    for prefix in ('ssh://git@github.com/', 'git@github.com:'):
+        if remote.startswith(prefix):
+            return 'https://github.com/' + remote[len(prefix):]
+    return remote
 
 
 def _pin_revisions(root, pins):
@@ -68,14 +72,15 @@ def _charts(site_root):
     return sorted(site_root.rglob('throughput-*-v2.svg'))
 
 
-def chart_grid(site_root, charts, blob, repo_ref):
+def chart_grid(site_root, charts, blob, repo_ref, root=None):
+    root = pathlib.Path(root) if root else site_root
     if not charts:
         return ''
     figures = []
     for svg in charts:
         family = svg.stem.removeprefix('throughput-').removesuffix('-v2')
         rel = svg.relative_to(site_root)
-        table = svg.with_suffix('.md').relative_to(site_root)
+        table = svg.with_suffix('.md').relative_to(root)  # blob links are repository-root relative
         figures.append(
             f'<figure><a href="{html.escape(str(rel))}"><img src="{html.escape(str(rel))}" '
             f'alt="{html.escape(family)} throughput chart" loading="lazy"></a>'
@@ -90,8 +95,8 @@ def chart_grid(site_root, charts, blob, repo_ref):
 def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extra_html='',
                root=None):
     """Write `<site_root>/index.html` from the artifacts under it."""
-    site_root = pathlib.Path(site_root)
-    root = pathlib.Path(root) if root else site_root
+    site_root = pathlib.Path(site_root).resolve()
+    root = pathlib.Path(root).resolve() if root else site_root
     while not (root / '.git').exists() and root != root.parent:
         root = root.parent
     blob = _blob_base(root)
@@ -126,7 +131,7 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
 <p>{intro}</p>
 <ul>{pin_lines}</ul>
 {extra_html}
-{chart_grid(site_root, charts, blob, repo_ref)}
+{chart_grid(site_root, charts, blob, repo_ref, root)}
 <h2>Pages</h2><ul>{''.join(items) or '<li class="muted">no pages yet</li>'}</ul>
 </body></html>
 """)
