@@ -888,5 +888,152 @@ class ToolkitRepositoryTest(unittest.TestCase):
             jsonschema_lite.check_schema(json.loads(path.read_text()))
 
 
+class PublishPrFlowTest(unittest.TestCase):
+    """The publish driver reaches main through a pull request; subprocess is mocked."""
+
+    def setUp(self):
+        from campaign_toolkit import publish
+        self.publish = publish
+        self.calls = []
+        self.state = dict(branch='main', counts='0\t0', commits=1, checks=[(0, 'ok')], gh_auth=0)
+        p = mock.patch.object(publish.time, 'sleep')
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch.object(publish.subprocess, 'run', side_effect=self.fake_run)
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch.object(publish, 'dirty', return_value=False)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def fake_run(self, cmd, cwd=None, capture_output=False, text=False, shell=False):
+        if isinstance(cmd, str):
+            return subprocess.CompletedProcess(cmd, 0, '', '')
+        self.calls.append(list(cmd))
+        out, code = '', 0
+        if cmd[0] == 'gh':
+            sub = cmd[1:3]
+            if sub == ['auth', 'status']:
+                code = self.state['gh_auth']
+            elif sub == ['pr', 'create']:
+                out = 'https://github.com/o/r/pull/7\n'
+            elif sub == ['pr', 'checks']:
+                checks = self.state['checks']
+                code, out = checks.pop(0) if len(checks) > 1 else checks[0]
+            elif sub == ['pr', 'view']:
+                out = 'MERGED\n'
+        elif cmd[0] == 'git':
+            args = cmd[3:]
+            if args[:2] == ['branch', '--show-current']:
+                out = self.state['branch'] + '\n'
+            elif args[:1] == ['rev-list'] and '--left-right' in args:
+                out = self.state['counts'] + '\n'
+            elif args[:1] == ['rev-list']:
+                out = f"{self.state['commits']}\n"
+            elif args[:1] == ['log']:
+                out = 'publish: refresh\nsite: regenerate\n'
+        return subprocess.CompletedProcess(cmd, code, out, '')
+
+    def gh_calls(self):
+        return [c for c in self.calls if c[0] == 'gh']
+
+    def git_args(self):
+        return [c[3:] for c in self.calls if c[0] == 'git']
+
+    def campaign(self):
+        return {'name': 'demo', 'root': '/nonexistent/demo'}
+
+    def run_plan(self, *extra):
+        import yaml
+        plan = pathlib.Path(tempfile.mkdtemp()) / 'plan.yaml'
+        plan.write_text(yaml.safe_dump({'toolkit': '/nonexistent/tk', 'campaigns': [
+            {'name': 'demo', 'root': '/nonexistent/demo', 'publish': 'true'}]}))
+        return self.publish.main(['--plan', str(plan), *extra])
+
+    def test_preflight_refuses_behind_ahead_wrong_branch_and_missing_gh(self):
+        cases = [dict(counts='0\t3'), dict(counts='2\t0'), dict(branch='feature'), dict(gh_auth=1)]
+        for change in cases:
+            self.state.update(dict(branch='main', counts='0\t0', gh_auth=0))
+            self.state.update(change)
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    self.publish.preflight([self.campaign()], pathlib.Path('/nonexistent/tk'))
+            self.assertEqual(cm.exception.code, 1, change)
+        self.state.update(dict(branch='main', counts='0\t0', gh_auth=0))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.publish.preflight([self.campaign()], pathlib.Path('/nonexistent/tk'))
+
+    def test_run_branches_pushes_and_merges_with_merge_commit(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.run_plan(), 0)
+        git = self.git_args()
+        switch = [a for a in git if a[:3] == ['switch', '-q', '-c']]
+        self.assertEqual(len(switch), 1)
+        branch = switch[0][3]
+        self.assertRegex(branch, r'^publish/demo-\d{8}T\d{6}Z$')
+        self.assertIn(['push', '-q', '-u', 'origin', branch], git)
+        gh = self.gh_calls()
+        create = next(c for c in gh if c[1:3] == ['pr', 'create'])
+        self.assertIn('--base', create)
+        self.assertEqual(create[create.index('--title') + 1], 'publish: refresh')
+        body = create[create.index('--body') + 1]
+        self.assertTrue(body.endswith('\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)'))
+        self.assertIn('campaign_toolkit.publish', body)
+        self.assertTrue(any(c[1:3] == ['pr', 'checks'] and '--watch' in c and '--fail-fast' in c for c in gh))
+        merge = next(c for c in gh if c[1:3] == ['pr', 'merge'])
+        self.assertIn('--merge', merge)
+        self.assertIn('--delete-branch', merge)
+        flat = [x for c in gh for x in c]
+        for banned in ('--admin', '--squash', '--rebase'):
+            self.assertNotIn(banned, flat)
+        self.assertIn(['pull', '-q', '--ff-only', 'origin', 'main'], git)
+        self.assertFalse(any(a[0] == 'push' and 'main' in a for a in git))
+
+    def test_nothing_new_deletes_branch(self):
+        self.state['commits'] = 0
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(self.run_plan(), 0)
+        self.assertIn('nothing new to publish', buf.getvalue())
+        git = self.git_args()
+        self.assertTrue(any(a[:1] == ['branch'] and '-D' in a for a in git))
+        self.assertIn(['switch', '-q', 'main'], git)
+        self.assertFalse(any(a[:1] == ['push'] for a in git))
+        self.assertFalse(any(c[1:3] == ['pr', 'create'] for c in self.gh_calls()))
+
+    def test_failing_checks_exit_without_merging(self):
+        self.state['checks'] = [(1, 'index fail')]
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                self.run_plan()
+        self.assertIn('https://github.com/o/r/pull/7', str(cm.exception.code))
+        self.assertFalse(any(c[1:3] == ['pr', 'merge'] for c in self.gh_calls()))
+
+    def test_no_checks_reported_retries_then_proceeds(self):
+        self.state['checks'] = [(1, 'no checks reported on the branch')]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.run_plan(), 0)
+        checks = [c for c in self.gh_calls() if c[1:3] == ['pr', 'checks']]
+        self.assertGreater(len(checks), 1)
+        self.assertTrue(any(c[1:3] == ['pr', 'merge'] for c in self.gh_calls()))
+
+    def test_no_merge_stops_after_create(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(self.run_plan('--no-merge'), 0)
+        gh = self.gh_calls()
+        self.assertTrue(any(c[1:3] == ['pr', 'create'] for c in gh))
+        self.assertFalse(any(c[1:3] == ['pr', 'checks'] for c in gh))
+        self.assertFalse(any(c[1:3] == ['pr', 'merge'] for c in gh))
+        self.assertIn('https://github.com/o/r/pull/7', buf.getvalue())
+        self.assertEqual(self.git_args()[-1], ['switch', '-q', 'main'])
+
+    def test_dry_run_mentions_pr_flow(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(self.run_plan('--dry-run'), 0)
+        self.assertIn('PR to main', buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
