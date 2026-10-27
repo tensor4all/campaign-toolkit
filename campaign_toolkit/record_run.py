@@ -345,19 +345,51 @@ def recorder_output_paths(d):
     return [x for x in paths if not any(x != y and x.startswith(y + '/') for y in paths)]
 
 
+def sibling_output_paths(d):
+    """Outputs declared by the other campaign descriptors of this harness repo, as relative paths.
+
+    A repo holding several campaigns keeps their descriptors side by side (`campaign*.yaml` beside
+    this one). Recording one writes its pages and runs; the next campaign must not read those as
+    harness source. A sibling path that is, contains or lies inside one of this campaign's own
+    source locations (descriptor, suites, profiles, pin files) is never excluded.
+    """
+    own = recorder_output_paths(d)
+    source = [d.path, d.suites_dir, d.profiles_file] + [d.pin_file(i) for i in d.identities]
+    source = [pathlib.Path(p).resolve() for p in source]
+    out = []
+    for path in sorted(d.path.resolve().parent.glob('campaign*.yaml')):
+        if path.resolve() == d.path.resolve():
+            continue
+        try:
+            sib = descriptor.Descriptor(d.root, yaml.safe_load(path.read_text()), path)
+            rel = recorder_output_paths(sib)
+        except (OSError, yaml.YAMLError, KeyError, TypeError, AttributeError):
+            continue  # not a loadable campaign descriptor: nothing it declares can be excluded
+        for x in rel:
+            full = (d.root / x).resolve()
+            if x in own or x in out or any(full == s or s in full.parents or full in s.parents
+                                          for s in source):
+                continue
+            out.append(x)
+    return sorted(out)
+
+
 def harness_source_state(d):
-    """`dirty`: tracked harness source differs from HEAD, ignoring the recorder's own outputs.
+    """`dirty`: tracked harness source differs from HEAD, ignoring recorder outputs.
 
     Everything else (code, Cargo.lock, suites, pins, scripts) still counts. `outputs_dirty` says
-    whether the excluded output locations were themselves modified or new, and
-    `excluded_outputs` names the pathspecs left out, so a manifest says why a run is clean source.
+    whether this campaign's own output locations were modified or new, `excluded_outputs` names
+    them, and `excluded_sibling_outputs` names the other campaigns' outputs left out too, so a
+    manifest says why a run is clean source.
     """
     excluded = recorder_output_paths(d)
-    specs = [f':(exclude){x}' for x in excluded]
+    siblings = sibling_output_paths(d)
+    specs = [f':(exclude){x}' for x in excluded + siblings]
     dirty = bool(git(d.root, 'status', '--porcelain', '--untracked-files=no', '--', '.', *specs))
     outputs_dirty = bool(excluded) and bool(git(d.root, 'status', '--porcelain', '--untracked-files=normal',
                                                 '--', *excluded))
-    return {'dirty': dirty, 'outputs_dirty': outputs_dirty, 'excluded_outputs': excluded}
+    return {'dirty': dirty, 'outputs_dirty': outputs_dirty, 'excluded_outputs': excluded,
+            'excluded_sibling_outputs': siblings}
 
 
 def source_changed(source, commit, d):

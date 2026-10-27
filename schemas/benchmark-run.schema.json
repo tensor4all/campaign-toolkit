@@ -252,6 +252,11 @@
           "items": {"type": "string"},
           "description": "Campaign-relative paths left out of the `dirty` check: the results root, the result pages directory and the index, as the descriptor declares them."
         },
+        "excluded_sibling_outputs": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Campaign-relative output paths declared by the other campaign descriptors of the same harness repository, also left out of the `dirty` check. `outputs_dirty` does not cover them."
+        },
         "dirty": {
           "type": [
             "boolean",
