@@ -48,5 +48,68 @@ class RepoRootLinks(unittest.TestCase):
                 self.assertNotIn('blob/main/zen5-cpu', out)
 
 
+NEW, OLD = 'bbbbbbbbbbbb', 'aaaaaaaaaaaa'
+
+
+def _stamped(path, stamp):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'# page\n\n- timestamp: `{stamp}`\n')
+    return path
+
+
+def _campaign(tmp, pin):
+    root = pathlib.Path(tmp) / 'camp'
+    root.mkdir()
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    subprocess.run(['git', '-C', str(root), 'remote', 'add', 'origin',
+                    'git@github.com:org/camp.git'], check=True)
+    (root / 'pins').mkdir()
+    (root / 'pins' / 'lib.rev').write_text(f'# comment\n{pin}0000000000000000000000000000\n')
+    return root, root / 'result' / 'zen5-cpu' / 'kern'
+
+
+def _site(root):
+    return site.write_site(root / 'result', pins=['pins/lib.rev']).read_text()
+
+
+class LatestGeneration(unittest.TestCase):
+    def test_two_pins_only_the_pinned_page_is_linked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, suite = _campaign(tmp, NEW)
+            _stamped(suite / f'{OLD}-mkl-timing-v2.md', '2026-10-01T00:00:00Z')
+            _stamped(suite / f'{NEW}-mkl-timing-v2.md', '2026-10-20T00:00:00Z')
+            out = _site(root)
+            self.assertIn(f'{NEW}-mkl-timing-v2.md"', out)
+            self.assertNotIn(OLD, out)
+            self.assertNotIn('not at the pinned revision', out)
+            self.assertNotIn('superseded', out)
+
+    def test_two_vendor_arms_at_the_pin_are_both_linked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, suite = _campaign(tmp, NEW)
+            for arm in ('mkl', 'openblas'):
+                _stamped(suite / f'{OLD}-{arm}-timing-v2.md', '2026-10-01T00:00:00Z')
+                _stamped(suite / f'{NEW}-{arm}-timing-v2.md', '2026-10-20T00:00:00Z')
+            out = _site(root)
+            self.assertIn(f'{NEW}-mkl-timing-v2.md"', out)
+            self.assertIn(f'{NEW}-openblas-timing-v2.md"', out)
+            self.assertNotIn(OLD, out)
+
+    def test_no_page_at_the_pin_shows_newest_with_revision_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, suite = _campaign(tmp, NEW)
+            _stamped(suite / f'{NEW}-mkl-timing-v2.md', '2026-10-20T00:00:00Z')
+            other = root / 'result' / 'zen5-cpu' / 'other'
+            _stamped(other / f'{OLD}-mkl-timing-v2.md', '2026-10-01T00:00:00Z')
+            _stamped(other / 'cccccccccccc-mkl-timing-v2.md', '2026-10-05T00:00:00Z')
+            out = _site(root)
+            self.assertIn(f'kern/{NEW}-mkl-timing-v2.md"', out)
+            self.assertIn('other/cccccccccccc-mkl-timing-v2.md"', out)
+            self.assertNotIn(OLD, out)
+            self.assertIn('not at the pinned revision', out)
+            self.assertIn('<code>cccccccccccc</code>, recorded 2026-10-05', out)
+            self.assertEqual(out.count('not at the pinned revision'), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

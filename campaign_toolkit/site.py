@@ -3,9 +3,14 @@
     python -m campaign_toolkit.site --root <campaign> --site <dir> [--pin pins/x.rev]...
 
 A result page is Markdown; a browser shows it as text. This writes the one HTML page a
-campaign's site serves: the pages it has, grouped by whether they were recorded at the
-current pin, the throughput charts when the campaign has them, and whatever extra section
-the campaign passes (a joined comparison, for instance).
+campaign's site serves: the latest generation of results only, the throughput charts when
+the campaign has them, and whatever extra section the campaign passes (a joined
+comparison, for instance).
+
+Latest generation: for each (suite, vendor arm) the one page recorded at the campaign's
+pin on the newest hardware profile. When a (suite, arm) has no page at the pin, its newest
+page is shown and labelled with its revision and date, so the gap is visible. Older pages
+are never linked; they stay in the repository and its history.
 
 It is a view over committed artifacts. It does not measure, and it does not decide
 anything: a page it lists is a page that exists under the site root.
@@ -13,6 +18,7 @@ anything: a page it lists is a page that exists under the site root.
 import argparse
 import html
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -68,6 +74,55 @@ def _pages(site_root):
     return sorted(pages)
 
 
+_REV_PREFIX = re.compile(r'^(?:[0-9a-f]{12}-)+')
+_TIMESTAMP = re.compile(r'^- timestamp: `([^`]+)`', re.M)
+
+
+def _arm(page):
+    """The vendor arm in a page name: `<rev>[-<upstream>]-<arm>[-timing-v2].md` (may be '')."""
+    rest = _REV_PREFIX.sub('', page.stem + '-', count=1)
+    rest = re.sub(r'-?timing-v2-?$', '', rest)
+    return rest.strip('-')
+
+
+def _recorded(page):
+    """ISO timestamp the page records (`- timestamp: ...`), '' when it has none."""
+    m = _TIMESTAMP.search(page.read_text(errors='replace')[:6000])
+    return m.group(1) if m else ''
+
+
+def current_pages(site_root, revisions):
+    """Latest generation: [(page, at_pin, recorded)] one per (suite, arm), sorted by path.
+
+    Newest profile = the profile of the newest recorded page on the site. Within a
+    (suite, arm) that has pages on it, only that profile is considered; then a page at a
+    pinned revision wins over any other, and the newest recording breaks the remaining tie.
+    """
+    def at_pin(page):
+        return any(page.name.startswith(rev[:12]) for rev in revisions)
+
+    entries = []
+    for page in _pages(site_root):
+        parts = page.relative_to(site_root).parts
+        profile = parts[-3] if len(parts) >= 3 else ''
+        suite = parts[:-3] + parts[-2:-1] if len(parts) >= 3 else parts[:-1]
+        stamp = (_recorded(page), page.stat().st_mtime)
+        entries.append((page, (suite, _arm(page)), profile, at_pin(page), stamp))
+    if not entries:
+        return []
+    newest_profile = max(entries, key=lambda e: e[4])[2]
+    groups = {}
+    for entry in entries:
+        groups.setdefault(entry[1], []).append(entry)
+    chosen = []
+    for group in groups.values():
+        on_newest = [e for e in group if e[2] == newest_profile]
+        pool = on_newest or group
+        best = max(pool, key=lambda e: (e[3], e[4]))
+        chosen.append((best[0], best[3], best[4][0]))
+    return sorted(chosen, key=lambda c: c[0])
+
+
 def _charts(site_root):
     return sorted(site_root.rglob('throughput-*-v2.svg'))
 
@@ -101,28 +156,32 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
         root = root.parent
     blob = _blob_base(root)
     revisions = _pin_revisions(root, pins)
-    pages = _pages(site_root)
+    pages = current_pages(site_root, revisions)
     charts = _charts(site_root)
 
-    def at_pin(page):
-        return any(page.name.startswith(rev[:12]) for rev in revisions)
-
-    pages.sort(key=lambda p: (not at_pin(p), -p.stat().st_mtime))
     items = []
-    for page in pages:
+    for page, at_pin, recorded in pages:
         rel = page.relative_to(site_root)
         if 'github.com' in blob:
             href = f'{blob}/blob/{repo_ref}/{page.relative_to(root)}'
             note = ' <span class="muted">(Markdown, rendered by GitHub)</span>'
         else:
             href, note = str(rel), ''
-        mark = '' if at_pin(page) else ' <span class="muted">(superseded)</span>'
+        mark = ''
+        if not at_pin:
+            rev = _REV_PREFIX.match(page.name + '-')
+            rev = rev.group(0)[:12] if rev else page.name
+            date = recorded[:10] or 'date not recorded'
+            pinned = ', '.join(r[:12] for r in revisions) or 'none'
+            mark = (f' <strong>not at the pinned revision</strong> <span class="muted">(revision '
+                    f'<code>{html.escape(rev)}</code>, recorded {html.escape(date)}; pin is '
+                    f'<code>{html.escape(pinned)}</code>)</span>')
         items.append(f'<li><a href="{html.escape(href)}">{html.escape(str(rel))}</a>{note}{mark}</li>')
 
     heading = title or 'Benchmark results'
-    intro = intro or ('One page per `(suite, hardware profile, revision, vendor arm)`, generated '
-                      'from the recorded data. The pages at the pinned revision come first; the '
-                      'rest are kept as history and marked.')
+    intro = intro or ('The latest generation of results: for each suite and vendor arm, the page '
+                      'recorded at the pinned revision. Earlier recordings are not listed here; they '
+                      'stay in the git history of this repository.')
     pin_lines = ''.join(f'<li>pinned revision: <code>{html.escape(rev)}</code></li>' for rev in revisions)
     (site_root / 'index.html').write_text(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>{html.escape(heading)}</title>
