@@ -8,6 +8,7 @@ site step. The routine is deliberately boring:
 
 1. **Preflight** before anything is measured: no campaign holds `target/campaign.lock`, every
    tree is clean (a dirty tree is refused by the recorder anyway, but after a build), every
+   campaign's `requirements.txt` pins the toolkit at its HEAD (CI validates with the pin), every
    campaign is on `main` level with `origin/main`, `gh` is logged in, the toolkit is clean,
    and the machine is in the state the timing policy wants (no turbo, the
    observer off the measured CPUs). A failure here costs seconds; the same failure later
@@ -25,6 +26,7 @@ site step. The routine is deliberately boring:
 Nothing here decides what to measure; that stays in each campaign's descriptor.
 """
 import argparse
+import re
 import pathlib
 import subprocess
 import sys
@@ -81,6 +83,29 @@ def check_remote(root):
     return None
 
 
+PIN_RE = re.compile(r'git\+\S*?campaign-toolkit(?:\.git)?@([0-9a-fA-F]{7,40})')
+
+
+def pinned_toolkit_sha(root):
+    """The campaign-toolkit revision `requirements.txt` pins, or None (no file or no such line)."""
+    req = pathlib.Path(root) / 'requirements.txt'
+    if not req.is_file():
+        return None
+    for line in req.read_text().splitlines():
+        line = line.strip()
+        if line.startswith('#'):
+            continue
+        m = PIN_RE.search(line)
+        if m:
+            return m.group(1).lower()
+    return None
+
+
+def toolkit_head(toolkit):
+    code, text = out(['git', '-C', str(toolkit), 'rev-parse', 'HEAD'])
+    return text.strip().lower() if code == 0 else None
+
+
 def preflight(campaigns, toolkit):
     problems = []
     if out(['gh', 'auth', 'status'])[0] != 0:
@@ -96,6 +121,18 @@ def preflight(campaigns, toolkit):
                 problems.append(f"{c['name']}: a measurement holds {lock}")
         if dirty(c['root']):
             problems.append(f"{c['name']}: the tree is dirty; commit or clean it first")
+    head = toolkit_head(toolkit)
+    for c in campaigns:
+        pin = pinned_toolkit_sha(c['root'])
+        if pin is None:
+            problems.append(f"{c['name']}: requirements.txt has no campaign-toolkit pin "
+                            f"(`campaign-toolkit @ git+https://github.com/tensor4all/campaign-toolkit@<sha>` "
+                            f"or `-e git+...@<sha>#egg=campaign-toolkit`); add one at the toolkit HEAD")
+        elif head is None or not (head.startswith(pin) or pin.startswith(head)):
+            problems.append(f"{c['name']}: requirements.txt pins campaign-toolkit {pin} but the toolkit "
+                            f"checkout {toolkit} is at {head}; CI validates manifests with the pinned toolkit "
+                            f"while the recorder writes them with the checkout. Bump the pin to {head} "
+                            f"in a PR and merge it first")
     if dirty(toolkit):
         problems.append(f'toolkit {toolkit} is dirty; the recorder refuses a dirty toolkit')
     if problems:

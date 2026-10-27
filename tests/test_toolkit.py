@@ -926,6 +926,57 @@ class ToolkitRepositoryTest(unittest.TestCase):
             jsonschema_lite.check_schema(json.loads(path.read_text()))
 
 
+class PublishPinGuardTest(unittest.TestCase):
+    """preflight refuses a campaign whose pinned toolkit differs from the checkout's HEAD."""
+    HEAD = 'a' * 40
+
+    def setUp(self):
+        from campaign_toolkit import publish
+        self.publish = publish
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        for name, value in (('check_remote', None), ('dirty', False), ('toolkit_head', self.HEAD)):
+            p = mock.patch.object(publish, name, return_value=value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(publish, 'out', return_value=(0, ''))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def campaign(self, requirements):
+        root = self.tmp / 'demo'
+        root.mkdir(exist_ok=True)
+        req = root / 'requirements.txt'
+        if requirements is None:
+            req.unlink(missing_ok=True)
+        else:
+            req.write_text(requirements)
+        return {'name': 'demo', 'root': str(root)}
+
+    def refused(self, requirements):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit):
+                self.publish.preflight([self.campaign(requirements)], self.tmp)
+        return err.getvalue()
+
+    def test_matching_pin_passes_in_both_forms(self):
+        url = 'git+https://github.com/tensor4all/campaign-toolkit@' + self.HEAD
+        for text in (f'pyyaml\ncampaign-toolkit @ {url}\n', f'-e {url}#egg=campaign-toolkit\n'):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.publish.preflight([self.campaign(text)], self.tmp)
+
+    def test_stale_pin_names_both_shas(self):
+        old = 'b' * 40
+        msg = self.refused(f'campaign-toolkit @ git+https://github.com/tensor4all/campaign-toolkit@{old}\n')
+        self.assertIn(old, msg)
+        self.assertIn(self.HEAD, msg)
+        self.assertIn('Bump the pin', msg)
+
+    def test_missing_pin_or_file_is_refused(self):
+        self.assertIn('no campaign-toolkit pin', self.refused('pyyaml\n# campaign-toolkit @ git+https://x/campaign-toolkit@' + 'c' * 40 + '\n'))
+        self.assertIn('no campaign-toolkit pin', self.refused(None))
+
+
 class PublishPrFlowTest(unittest.TestCase):
     """The publish driver reaches main through a pull request; subprocess is mocked."""
 
@@ -943,6 +994,10 @@ class PublishPrFlowTest(unittest.TestCase):
         p = mock.patch.object(publish, 'dirty', return_value=False)
         p.start()
         self.addCleanup(p.stop)
+        for name, value in (('pinned_toolkit_sha', 'a' * 40), ('toolkit_head', 'a' * 40)):
+            p = mock.patch.object(publish, name, return_value=value)
+            p.start()
+            self.addCleanup(p.stop)
 
     def fake_run(self, cmd, cwd=None, capture_output=False, text=False, shell=False):
         if isinstance(cmd, str):
