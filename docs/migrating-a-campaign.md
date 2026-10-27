@@ -116,7 +116,7 @@ implementation of all of it:
 | `verify` arguments | `--threads --n --batch --dtype --family` | plus `--regime LABEL --csv PATH`, and a final `all comparisons within tolerance` line on success |
 | verification census | none | one CSV row per (regime, family, dtype, order, shape, batch, engine row, budget) with `status` and `note`, including declared skips |
 | `run` statistics | one reduced number per row | `--statistic best\|median`, `--reps M`, `--prime-ms MS`, and the chronological calls in a `samples_ms` column |
-| thread budgets | the harness' own choice | per-row `rayon_threads` and `vendor_threads` columns that echo the requested budget |
+| thread budgets | the harness' own choice | per-row `pool_threads` (the harness's own pool; `rayon_threads` is accepted as the historical name) and `vendor_threads` columns that echo the requested budget |
 | row rotation | none | rotate the engine rows per process start (`--rotate-rows K`), which is what makes an acceptance comparison position-balanced |
 | CSV columns | campaign-specific | exactly the campaign's `csv_columns` (the toolkit refuses a manifest whose columns are missing) |
 

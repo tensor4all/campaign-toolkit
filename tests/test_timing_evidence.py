@@ -179,6 +179,28 @@ class TimingEvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, error):
                     self.validate()
 
+    def _rename_budget_column(self, new):
+        for name in self.manifest['result_files'] + self.manifest['verification_files']:
+            rows = [{(new if k == 'rayon_threads' else k): v for k, v in row.items()}
+                    for row in self.rows(name)]
+            self.write(name, rows)
+
+    def test_pool_threads_column_is_the_pool_budget(self):
+        """tlinalg 0.6.0 writes pool_threads; a wrong value is still refused."""
+        self._rename_budget_column('pool_threads')
+        self.validate()
+        name = 'run0-small-1t.csv'
+        rows = self.rows(name)
+        rows[0]['pool_threads'] = '24'
+        self.write(name, rows)
+        with self.assertRaisesRegex(ValueError, 'thread budgets'):
+            self.validate()
+
+    def test_rayon_threads_column_still_accepted(self):
+        """Historical runs and harnesses that still write rayon_threads (fbench, tcbench, cpueinsum)."""
+        self.assertIn('rayon_threads', self.rows('run0-small-1t.csv')[0])
+        self.validate()
+
     def test_schedule_dirty_source_and_wrong_grid_are_checked(self):
         name = 'run1-small-1t.csv'
         self.write(name, self.rows(name)[2:] + self.rows(name)[:2])

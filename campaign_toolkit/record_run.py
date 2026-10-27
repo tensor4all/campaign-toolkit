@@ -360,6 +360,19 @@ def harness_source_state(d):
     return {'dirty': dirty, 'outputs_dirty': outputs_dirty, 'excluded_outputs': excluded}
 
 
+def source_changed(source, commit, d):
+    """True when `source` is no longer at `commit` or has tracked edits.
+
+    The harness checkout is judged by `harness_source_state` (its own recorded outputs are not
+    source); the toolkit checkout and the measured library are judged over the whole tree.
+    """
+    if git(source, 'rev-parse', 'HEAD') != commit:
+        return True
+    if pathlib.Path(source).resolve() == pathlib.Path(d.root).resolve():
+        return harness_source_state(d)['dirty']
+    return bool(git(source, 'status', '--porcelain', '--untracked-files=no'))
+
+
 def build_features(suite, arm, d):
     """The cargo feature list the build is invoked with.
 
@@ -949,8 +962,7 @@ def main(argv=None, root=None):
             if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
                 moved.append(('the measured binary', 'its SHA-256 changed'))
             for source, commit in sources:
-                if (git(source, 'rev-parse', 'HEAD') != commit
-                        or git(source, 'status', '--porcelain', '--untracked-files=no')):
+                if source_changed(source, commit, d):
                     moved.append((source, 'HEAD moved or the tree is dirty'))
         return moved
 
@@ -1006,8 +1018,7 @@ def main(argv=None, root=None):
         if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
             sys.exit('ERROR: measured binary changed during recording')
         for source, commit in sources:
-            if (git(source, 'rev-parse', 'HEAD') != commit
-                    or git(source, 'status', '--porcelain', '--untracked-files=no')):
+            if source_changed(source, commit, d):
                 sys.exit(f'ERROR: measured source changed during recording: {source}')
     manifest = {
         "schema_version": 1,
