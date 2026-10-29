@@ -198,6 +198,10 @@ def validate(path, check_git=True):
         errors.append(f"target_profile {manifest['target_profile']!r} is not in "
                       f"{descriptor.current().data['profiles_file']}")
 
+    profile = next((p for p in descriptor.current().profiles() if p["name"] == manifest["target_profile"]), {})
+    if profile.get("record_numa") and not manifest["host"].get("numa"):
+        errors.append(f"host.numa: profile {profile['name']!r} requires the NUMA layout to be recorded")
+
     suite_file, suite = find_suite(manifest["suite_id"])
     if suite is None:
         errors.append(f"suite_id {manifest['suite_id']!r} has no {descriptor.current().data['suites_dir']}"

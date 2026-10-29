@@ -492,6 +492,18 @@ def require_quiet_observing_side(cpu_sets):
     sys.exit("\n".join(lines))
 
 
+def require_numa_recorded(profile):
+    """Refuse to record where the profile says the NUMA layout must be recorded and it cannot be.
+
+    A Zen 2 host's NPS setting changes the numbers and is not known in advance, so a run whose
+    manifest could not state it is not comparable with anything.
+    """
+    if profile.get("record_numa") and hostinfo.numa_layout() is None:
+        sys.exit(f"ERROR: profile {profile['name']!r} requires the NUMA layout to be recorded "
+                 f"(record_numa), but this host exposes none under /sys/devices/system/node; "
+                 f"refusing to record a run that cannot state it")
+
+
 def host_info(profile_name, profiles):
     profile = next(p for p in profiles if p["name"] == profile_name)
     lscpu = subprocess.run(["lscpu"], capture_output=True, text=True).stdout
@@ -878,6 +890,7 @@ def main(argv=None, root=None):
     require_quiet_observing_side(cpu_sets)
     observer_record = observer_affinity(cpu_sets)
     require_boost_disabled()
+    require_numa_recorded(next(p for p in profiles if p["name"] == args.profile))
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')
     toolkit = None

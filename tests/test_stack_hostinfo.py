@@ -181,6 +181,60 @@ class RunSchemaTest(unittest.TestCase):
             jsonschema_lite.validate(manifest, schema("benchmark-run.schema.json"))
 
 
+class RecordNumaTest(unittest.TestCase):
+    """`record_numa` in a profile is enforced when recording and when validating."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.root = self.tmp / "campaign"
+        shutil.copytree(FIXTURE, self.root)
+        suite = self.root / "benchmarks/suites/fixture-kernels.yaml"
+        import hashlib
+        sha = hashlib.sha256(suite.read_bytes()).hexdigest()
+        for path in self.root.rglob("*"):
+            if path.suffix in (".yaml", ".rev"):
+                path.write_text(path.read_text().replace("@COMMIT@", "1" * 40).replace("@SUITE_SHA@", sha))
+        descriptor.set_root(self.root)
+        self.manifest = next((self.root / "data/results").glob("*/*/*/run.yaml"))
+
+    def flag(self, on):
+        path = self.root / "benchmarks/profiles.yaml"
+        data = yaml.safe_load(path.read_text())
+        data["profiles"][0]["record_numa"] = on
+        path.write_text(yaml.safe_dump(data))
+
+    def errors(self, numa="absent"):
+        from campaign_toolkit import validate_run
+        manifest = yaml.safe_load(self.manifest.read_text())
+        if numa != "absent":
+            manifest["host"]["numa"] = numa
+        self.manifest.write_text(yaml.safe_dump(manifest))
+        return [e for e in validate_run.validate(str(self.manifest), check_git=False) if "numa" in e]
+
+    def test_recording_is_refused_without_a_numa_layout(self):
+        from unittest import mock
+        profile = {"name": "p", "record_numa": True}
+        with mock.patch.object(hostinfo, "numa_layout", return_value=None), self.assertRaises(SystemExit) as raised:
+            record_run.require_numa_recorded(profile)
+        self.assertIn("record_numa", str(raised.exception))
+        with mock.patch.object(hostinfo, "numa_layout", return_value={"nodes": 1, "cpulists": {}}):
+            record_run.require_numa_recorded(profile)                       # accepted
+        with mock.patch.object(hostinfo, "numa_layout", return_value=None):
+            record_run.require_numa_recorded({"name": "q"})                 # no flag: unaffected
+
+    def test_validation_requires_host_numa_for_a_flagged_profile(self):
+        self.flag(True)
+        self.assertTrue(self.errors())                                       # old manifest: no host.numa
+        self.assertTrue(self.errors(numa=None))
+        self.assertEqual(self.errors(numa={"nodes": 4, "cpulists": {}}), [])
+
+    def test_old_manifests_of_unflagged_profiles_are_unaffected(self):
+        self.assertEqual(self.errors(), [])
+        self.flag(False)
+        self.assertEqual(self.errors(), [])
+
+
 class StackFilesTest(unittest.TestCase):
     def test_shipped_stack_is_valid_and_matches_the_root_copy(self):
         stack = stackmod.load()
