@@ -13,8 +13,10 @@ a root is read through its own published index, so both inputs take the same
 code path. One campaign is the same code path as several: the table simply has
 one campaign in it.
 
-The output is keyed by `(campaign, suite, profile, revision, vendor)` and each
-row links back to the campaign's page and to the campaign's own index.
+A campaign's pages are read from its index (the pages at its pins) and the
+`HISTORY.md` beside it (every other page), or from an older index's single
+`All pages` table. The output has one row per `(campaign, page)` and each row
+links back to the campaign's page and to the campaign's own index.
 """
 from __future__ import annotations
 
@@ -89,55 +91,90 @@ def parse_table(lines: list) -> list:
     return rows
 
 
-def parse_index(index: pathlib.Path) -> dict:
-    """One published index: its campaign, its reference revisions, its page rows.
-
-    Only the `## All pages` table is read: it is the one table that carries
-    every page, and the `Cells` table is a projection of it that this command
-    re-derives by key.
-    """
-    campaign = campaign_id(index)
+def _sections(path: pathlib.Path) -> tuple:
+    """(reference revisions, {section title: [lines]}) of one generated markdown file."""
     reference = {"library": "", "upstream": ""}
-    table, section, capture = [], "", False
-    for line in index.read_text().splitlines():
+    sections, current = {}, None
+    for line in path.read_text().splitlines():
         match = REFERENCE.match(line)
         if match:
             reference["upstream" if match.group(1) == "upstream" else "library"] = match.group(3)
             continue
         if line.startswith("## "):
-            section = line[3:].strip()
-            capture = section == "All pages"
+            current = sections.setdefault(line[3:].strip(), [])
             continue
-        if capture:
+        if current is not None:
+            current.append(line)
+    return reference, sections
+
+
+def _tables(lines: list) -> list:
+    """Every markdown table in `lines` (a section may hold several, one per subsection)."""
+    tables, table = [], []
+    for line in lines:
+        if line.startswith("|"):
             table.append(line)
+        elif table:
+            tables.append(table)
+            table = []
+    if table:
+        tables.append(table)
+    return [row for t in tables for row in parse_table(t)]
+
+
+def parse_index(index: pathlib.Path) -> dict:
+    """One published index: its campaign, its reference revisions, its page rows.
+
+    A campaign index lists the pages at its pins in `## Cells` and every other page in the
+    `HISTORY.md` beside it (`## Older pages`); both are read, so the union keeps every page.
+    An index published before the history file existed carries every page in `## All pages`,
+    which is read instead. `missing` cells name no page and are not rows here.
+    """
+    campaign = campaign_id(index)
+    reference, sections = _sections(index)
+    if "All pages" in sections:
+        raws = _tables(sections["All pages"])
+    else:
+        raws = _tables(sections.get("Cells", []))
+        history = index.parent / "HISTORY.md"
+        if history.exists():
+            raws += _tables(_sections(history)[1].get("Older pages", []))
     rows = []
-    for raw in parse_table(table):
+    for raw in raws:
         if "suite" not in raw or "page" not in raw:
             continue
         link = PAGE_LINK.search(raw["page"])
-        target = (index.parent / link.group(2)).resolve() if link else None
+        if link is None:
+            continue  # a `missing` cell: no page to list
+        target = (index.parent / link.group(2)).resolve()
         # A dual-identity campaign publishes its revision as `fork/upstream`; that
         # whole string is the page's identity, so it stays one value here.
         revision = raw.get("revision", raw.get("fork/upstream", "")).strip("`")
         rows.append(dict(
             campaign=campaign,
             suite=raw.get("suite", "").strip("`"),
-            profile=raw.get("profile", "").strip("`"),
+            # the Cells table marks an optional profile after the name: `zen5-cpu` (optional)
+            profile=raw.get("profile", "").split(" (", 1)[0].strip("`"),
             vendor=("" if raw.get("vendor", "-") == "-" else raw.get("vendor", "").strip("`")),
             revision=revision,
             version=("" if raw.get("version", "-") == "-" else raw.get("version", "")),
             date=raw.get("date", ""), coverage=raw.get("coverage", ""),
             status=raw.get("status", ""),
-            page=link.group(1) if link else raw["page"],
-            relative=link.group(2) if link else raw["page"],
+            page=link.group(1),
+            relative=link.group(2),
             target=target,
         ))
     return dict(campaign=campaign, index=index.resolve(), reference=reference, rows=rows)
 
 
 def key_of(row: dict):
-    """What makes a row a row: the campaign, the suite, the profile, the revision, the vendor arm."""
-    return (row["campaign"], row["suite"], row["profile"], row["revision"], row["vendor"])
+    """What makes a row a row: the campaign and the page. Two pages can share a revision and an
+    arm (two timing contracts), so the page path is the identity."""
+    return (row["campaign"], row["page"])
+
+
+def sort_key(row: dict):
+    return (row["campaign"], row["suite"], row["profile"], row["revision"], row["vendor"], row["date"], row["page"])
 
 
 def link_to(target, relative, out_dir=None):
@@ -180,12 +217,13 @@ def render(campaigns: list, rows: list, out_dir) -> str:
         "",
         "## Pages",
         "",
-        "Every published page, keyed by `(campaign, suite, profile, revision, vendor)`.",
+        "Every published page, keyed by `(campaign, page)` and sorted by suite, profile, revision",
+        "and vendor arm.",
         "",
         "| campaign | suite | profile | vendor | revision | version | date | coverage | status | page |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
-    for row in sorted(rows, key=lambda r: (key_of(r), r["date"])):
+    for row in sorted(rows, key=sort_key):
         vendor = f"`{row['vendor']}`" if row["vendor"] else "-"
         page = f"[{row['page']}]({link_to(row['target'], row['relative'], out_dir)})"
         out.append(
@@ -216,7 +254,8 @@ def main(argv=None):
         parsed.append(campaign)
         rows.extend(campaign["rows"])
 
-    # One row per key, newest first when a campaign somehow published two.
+    # One row per page; an index and its history never list a page twice, but the same
+    # campaign may be named twice on the command line.
     newest = {}
     for row in rows:
         current = newest.get(key_of(row))

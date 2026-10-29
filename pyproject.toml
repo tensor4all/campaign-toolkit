@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Hiroshi Shinaoka", email = "h.shinaoka@gmail.com" }]
-dependencies = ["pyyaml>=6"]
+dependencies = ["pyyaml>=6", "markdown>=3.4"]
 
 [project.scripts]
 campaign-record-run = "campaign_toolkit.record_run:main"

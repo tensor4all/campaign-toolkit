@@ -15,8 +15,8 @@ pip install -e /path/to/campaign-toolkit          # local development
 #   campaign-toolkit @ git+https://github.com/tensor4all/campaign-toolkit@<rev>
 ```
 
-The only runtime dependency is `pyyaml`. JSON Schemas are checked by the small
-built-in validator (`campaign_toolkit.jsonschema_lite`), not by `jsonschema`.
+The runtime dependencies are `pyyaml` and `markdown` (the site's page conversion).
+JSON Schemas are checked by the small built-in validator (`campaign_toolkit.jsonschema_lite`), not by `jsonschema`.
 
 ## The descriptor
 
@@ -84,10 +84,35 @@ Editing a shared profile therefore reaches every campaign that measures it; the
 run manifest still records what the host actually reported, so a recorded run is
 unaffected by a later profile edit.
 
+## The result index, the history and the site
+
+`campaign-gen-index --write` writes two files into the result directory:
+
+- `INDEX.md`: one row per `(suite, profile, vendor arm)` with the page measured at the
+  reference revisions (every recorded identity: the library pin, and for a campaign that
+  records a baseline the upstream commit or tag), or `missing`. A page is listed once, keyed
+  by its path.
+- `HISTORY.md`: every other page, newest first, grouped by the revisions it measured.
+  `INDEX.md` links it in one line at the top.
+
+`--check` checks both files. The gate follows *currency* (`status`), not the pin: a page
+measured before the pin moved can still be `current`, so moving a pin before re-measuring
+keeps CI green while its page moves to the history.
+
+`python -m campaign_toolkit.site --root <campaign>` writes the campaign's site into the
+result directory: `index.html` with one section per hardware profile (in the order of
+`benchmarks/profiles.yaml`; each section opens with one line naming the pin, the measurement
+dates, the power state and the toolchain of its runs), an HTML copy of every result page
+beside its `.md` (linked from the landing page and the history; the GitHub blob is its
+"source" link), and `history.html`, whose list of older pages is the same set as
+`HISTORY.md`, followed by the log of publication commits. The current page of a cell is the
+index's own rule (`gen_index.split_pages`), so the site and the index agree. The conversion
+uses the `markdown` package.
+
 ## The union index
 
 `campaign-union-index` reads several campaigns and writes one index across them,
-keyed by `(campaign, suite, profile, revision, vendor)`:
+one row per `(campaign, page)`:
 
 ```bash
 campaign-union-index /path/to/tlinalg-benchmark /path/to/faer-benchmark --out union.md
@@ -99,7 +124,9 @@ root is read through its own index, so both take the same code path, and one
 campaign is the same code path as several. The currency in the output is the
 currency each campaign already computed against *its own* pins and
 `invalidated_by` paths — this command re-derives no number. Each row links back
-to the campaign's page and to the campaign's own index.
+to the campaign's page and to the campaign's own index. A campaign's pages are read
+from its `INDEX.md` and the `HISTORY.md` beside it, or from the single `All pages`
+table of an index generated before the history file existed.
 
 ## Version-2 timing evidence
 

@@ -737,6 +737,177 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
         self.assertEqual(index.read_bytes(), before)
 
+    def _publish_a(self):
+        run_a = self.root / RUN_A_REL
+        self.assertEqual(report_run.main(["--run-dir", str(run_a)], root=self.root), 0)
+        self.assertEqual(publish_report.main([str(run_a)], root=self.root), 0)
+        return run_a
+
+    def _move_pin(self):
+        """A new commit in the measured checkout and the pin moved to it, without re-measuring."""
+        (self.checkout / "NEXT").write_text("next\n")
+        git(self.checkout, "add", "NEXT")
+        git(self.checkout, "commit", "-q", "-m", "next")
+        rev = git(self.checkout, "rev-parse", "HEAD")
+        (self.root / "pins/fixture-rs.rev").write_text(f"# moved\n{rev}\n")
+        return rev
+
+    def _links(self, path):
+        import re
+        return re.findall(r"\[(result/[^\]]+)\]", path.read_text())
+
+    def test_index_is_centred_on_the_pin_and_older_pages_move_to_history(self):
+        self._publish_a()
+        index, history = self.root / "result/INDEX.md", self.root / "result/HISTORY.md"
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        self.assertEqual(len(self._links(index)), 1)
+        self.assertEqual(self._links(history), [])
+        self.assertIn("[HISTORY.md](HISTORY.md)", index.read_text())
+
+        self._move_pin()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        text = index.read_text()
+        # The page is no longer at the pin: the cell is missing in the index, the page is history.
+        self.assertEqual(self._links(index), [])
+        self.assertIn("| missing |", text)
+        self.assertEqual(len(self._links(history)), 1)
+        self.assertIn("### `", history.read_text())
+        # Moving the pin before re-measuring keeps the gate green: currency, not the pin, decides.
+        self.assertEqual(gen_index.main(["--check"], root=self.root), 0)
+
+    def test_a_profile_named_twice_lists_each_page_once(self):
+        suite = self.root / SUITE_REL
+        suite.write_text(suite.read_text().replace(
+            "optional_profiles: []", "optional_profiles:\n  - fixture-cpu"))
+        self._publish_a()
+        self._move_pin()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        links = self._links(self.root / "result/INDEX.md") + self._links(self.root / "result/HISTORY.md")
+        self.assertEqual(len(links), len(set(links)))
+        self.assertEqual(len(links), 1)
+
+    def test_a_page_on_a_profile_the_suite_no_longer_names_is_still_listed(self):
+        # The suite drops the profile: its page is still read (not lost from the index), shown
+        # while it is at the pin and moved to the history when the pin moves.
+        self._publish_a()
+        suite = self.root / SUITE_REL
+        suite.write_text(suite.read_text().replace(
+            "required_profiles:\n  - fixture-cpu\noptional_profiles: []",
+            "required_profiles: []\noptional_profiles: []"))
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        self.assertEqual(len(self._links(self.root / "result/INDEX.md")), 1)
+        kernels = [line for line in (self.root / "result/INDEX.md").read_text().splitlines()
+                   if line.startswith("| `fixture-kernels`")]
+        self.assertTrue(kernels and not any("| missing |" in line for line in kernels))
+        self._move_pin()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        self.assertEqual(self._links(self.root / "result/INDEX.md"), [])
+        self.assertEqual(len(self._links(self.root / "result/HISTORY.md")), 1)
+
+    def _second_profile_run(self):
+        """Run A again on a second declared profile, published."""
+        import yaml as _yaml
+        profiles = self.root / "benchmarks/profiles.yaml"
+        data = _yaml.safe_load(profiles.read_text())
+        second = dict(data["profiles"][0], name="fixture-cpu-2", description="A second synthetic profile.")
+        data["profiles"].append(second)
+        profiles.write_text(_yaml.safe_dump(data, sort_keys=False))
+        suite = self.root / SUITE_REL
+        suite.write_text(suite.read_text().replace(
+            "optional_profiles: []", "optional_profiles:\n  - fixture-cpu-2"))
+        src = self.root / RUN_A_REL
+        dst = self.root / "data/results/fixture-cpu-2/fixture-kernels" / src.name
+        shutil.copytree(src, dst)
+        manifest = dst / "run.yaml"
+        manifest.write_text(manifest.read_text().replace("target_profile: fixture-cpu\n",
+                                                         "target_profile: fixture-cpu-2\n"))
+        self.assertEqual(report_run.main(["--run-dir", str(dst)], root=self.root), 0)
+        self.assertEqual(publish_report.main([str(dst)], root=self.root), 0)
+        return dst
+
+    def test_site_has_one_section_per_profile_and_agrees_with_the_history(self):
+        import re
+        from campaign_toolkit import site
+        self._publish_a()
+        self._second_profile_run()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        out = site.write_site(self.root / "result", root=self.root).read_text()
+        self.assertIn('<h2 id="fixture-cpu">', out)
+        self.assertIn('<h2 id="fixture-cpu-2">', out)
+        self.assertLess(out.index('id="fixture-cpu"'), out.index('id="fixture-cpu-2"'))
+        self.assertEqual(out.count('<p class="summary">pin: '), 2)
+        self.assertIn("power: ", out)
+        # Every page link on the landing is internal: the converted HTML beside the page.
+        pages = re.findall(r'<li><a href="([^"]+)"', out)
+        self.assertEqual(len(pages), 2)
+        for href in pages:
+            self.assertFalse(href.startswith("http"), href)
+            self.assertTrue(href.endswith(".html"), href)
+            self.assertIn("<table>", (self.root / "result" / href).read_text())
+
+        # The pin moves: both pages become history, and the two history lists agree.
+        self._move_pin()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        out = site.write_site(self.root / "result", root=self.root).read_text()
+        self.assertNotIn('<li><a href=', out.split("<h2 id=")[1] + out.split("<h2 id=")[2])
+        history = (self.root / "result/history.html").read_text()
+        listed = set(re.findall(r'<ul class="older">(.*?)</ul>', history, re.S)[0].split("</li>"))
+        listed = {re.sub(r".*>([^<]+\.md)</a>.*", r"\1", item, flags=re.S) for item in listed if ".md" in item}
+        documented = {link.removeprefix("result/") for link in self._links(self.root / "result/HISTORY.md")}
+        self.assertEqual(listed, documented)
+        self.assertEqual(len(documented), 2)
+
+    def test_at_pin_reads_every_identity_by_commit(self):
+        row = dict(library_commit="a" * 40, upstream_commit="b" * 40, upstream_ref="v1.0")
+        self.assertTrue(gen_index.at_pin(row, {"library": "a" * 40}))
+        self.assertTrue(gen_index.at_pin(row, {"library": "a" * 12, "upstream": "b" * 40}))
+        # An upstream-only pin move takes the page off the pin; an unresolved pin matches nothing.
+        self.assertFalse(gen_index.at_pin(row, {"library": "a" * 40, "upstream": "c" * 40}))
+        self.assertFalse(gen_index.at_pin(row, {"library": "a" * 40, "upstream": ""}))
+        self.assertFalse(gen_index.at_pin(row, {"library": "c" * 40}))
+
+    def test_a_tag_pin_is_compared_by_the_commit_it_names(self):
+        # A recorder may write the nearest preceding tag as the ref, so a descendant of the
+        # tag carries the tag's name; only the tagged commit is at the pin.
+        tagged = git(self.checkout, "rev-parse", "HEAD")
+        git(self.checkout, "tag", "v1.0")
+        descendant = self._move_pin()
+        self.assertEqual(gen_index.resolve_pin("v1.0", self.checkout), tagged)
+        self.assertEqual(gen_index.resolve_pin(descendant, self.checkout), descendant)
+        self.assertEqual(gen_index.resolve_pin("no-such-tag", self.checkout), "")
+        resolved = {"library": "a" * 40, "upstream": gen_index.resolve_pin("v1.0", self.checkout)}
+        on_tag = dict(library_commit="a" * 40, upstream_commit=tagged, upstream_ref="v1.0")
+        after_tag = dict(library_commit="a" * 40, upstream_commit=descendant, upstream_ref="v1.0")
+        self.assertTrue(gen_index.at_pin(on_tag, resolved))
+        self.assertFalse(gen_index.at_pin(after_tag, resolved))
+
+    def test_a_removed_suite_keeps_its_pages_in_the_history(self):
+        self._publish_a()
+        (self.root / SUITE_REL).unlink()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        self.assertEqual(self._links(self.root / "result/INDEX.md"), [])
+        history = self.root / "result/HISTORY.md"
+        self.assertEqual(len(self._links(history)), 1)
+        self.assertIn("retired", history.read_text())
+
+    def test_the_site_finds_its_campaign_without_an_explicit_root(self):
+        from campaign_toolkit import site
+        self._publish_a()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        out = site.write_site(self.root / "result").read_text()
+        self.assertIn('<p class="summary">pin: ', out)
+        self.assertNotIn("pin: none", out)
+        # A campaign that keeps its descriptor elsewhere names it through CAMPAIGN_DESCRIPTOR.
+        alt = self.root / "alt-campaign.yaml"
+        shutil.move(self.root / "benchmarks/campaign.yaml", alt)
+        os.environ["CAMPAIGN_DESCRIPTOR"] = "alt-campaign.yaml"
+        try:
+            out = site.write_site(self.root / "result", root=self.root).read_text()
+        finally:
+            del os.environ["CAMPAIGN_DESCRIPTOR"]
+        self.assertIn('<p class="summary">pin: ', out)
+        self.assertNotIn("pin: none", out)
+
     def test_index_reports_absent_checkout_only_when_something_is_recorded(self):
         # A campaign that has measured nothing has no currency to compute, so an absent
         # checkout is a note rather than a failure; once a page exists it is the reason
@@ -929,6 +1100,43 @@ class ToolkitRepositoryTest(unittest.TestCase):
         self.assertTrue(descriptor.profiles_dir().is_dir())
         with self.assertRaises(SystemExit):
             descriptor.shared_profile("no-such-profile")
+
+    def test_union_index_reads_cells_and_history_and_the_old_format(self):
+        # A regenerated campaign (Cells + HISTORY.md) and one still publishing `All pages`
+        # are read together; an optional profile keeps its name, a missing cell is no row, and
+        # two pages with the same revision and arm (two timing contracts) are both kept.
+        base = pathlib.Path(tempfile.mkdtemp())
+        head = ("| suite | profile | vendor | revision | version | date | coverage | status | page |\n"
+                "|---|---|---|---|---|---|---|---|---|\n")
+        new = base / "new/result"
+        new.mkdir(parents=True)
+        (new / "INDEX.md").write_text(
+            "# Result index\n\n- Reference revision (`pins/x.rev`): `aaaaaaaaaaaa`\n\n## Cells\n\n" + head +
+            "| `k` | `cpu` (optional) | `mkl` | `aaaaaaaaaaaa` | 1 | 2026-01-02 | full | current "
+            "| [result/cpu/k/a-mkl.md](cpu/k/a-mkl.md) |\n"
+            "| `k` | `cpu` (optional) | `openblas` | - | - | - | - | missing | - |\n")
+        (new / "HISTORY.md").write_text(
+            "# Result history\n\n## Older pages\n\n### `bbbbbbbbbbbb`: version 0\n\n" + head +
+            "| `k` | `cpu` | `mkl` | `bbbbbbbbbbbb` | 0 | 2026-01-01 | full | stale "
+            "| [result/cpu/k/b-mkl.md](cpu/k/b-mkl.md) |\n"
+            "| `k` | `cpu` | `mkl` | `bbbbbbbbbbbb` | 0 | 2026-01-01 | full | stale "
+            "| [result/cpu/k/b-mkl-timing-v2.md](cpu/k/b-mkl-timing-v2.md) |\n")
+        old = base / "old/result"
+        old.mkdir(parents=True)
+        (old / "INDEX.md").write_text(
+            "# Result index\n\n- Reference revision (`pins/x.rev`): `cccccccccccc`\n\n## All pages\n\n" + head +
+            "| `k` | `cpu` | - | `cccccccccccc` | 2 | 2026-01-03 | full | current "
+            "| [result/cpu/k/c.md](cpu/k/c.md) |\n")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            rc = union_index.main([str(new / "INDEX.md"), str(old / "INDEX.md")])
+        self.assertEqual(rc, 0)
+        text = buffer.getvalue()
+        for page in ("cpu/k/a-mkl.md", "cpu/k/b-mkl.md", "cpu/k/b-mkl-timing-v2.md", "cpu/k/c.md"):
+            self.assertIn(page, text)
+        self.assertNotIn("(optional)", text)
+        self.assertNotIn("missing", text)
+        self.assertEqual(text.count("| `new` | `k` |"), 3)
 
     def test_union_index_keeps_both_identities_of_a_dual_page(self):
         # A dual-identity campaign names a page by `fork/upstream`; two pages that
