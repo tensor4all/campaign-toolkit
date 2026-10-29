@@ -269,6 +269,45 @@
         }
       }
     },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the measured binary was built, as far as the recorder can state it. Absent from manifests recorded before this field existed.",
+      "properties": {
+        "toolchain": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The compiler and flags in the recorder's environment, which the build inherits; flags set only in a cargo config file are not visible here. `rustc` is the verbatim `rustc -vV`.",
+          "properties": {
+            "rustc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rustc_release": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rustflags": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target_cpu": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The `-C target-cpu` named by the flags, null when they name none."
+            }
+          }
+        }
+      }
+    },
     "host": {
       "type": "object",
       "required": [
@@ -306,6 +345,19 @@
             },
             "scaling_max_freq_khz": {
               "type": "string"
+            },
+            "smt": {
+              "type": "object",
+              "description": "Simultaneous multithreading as the kernel reports it, raw strings: `active` is `/sys/devices/system/cpu/smt/active` (1 or 0), `control` is `smt/control` (on, off, forceoff, notsupported). Absent from manifests recorded before this field existed.",
+              "additionalProperties": false,
+              "properties": {
+                "active": {
+                  "type": "string"
+                },
+                "control": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
@@ -353,6 +405,29 @@
             "null"
           ],
           "description": "Per-domain L3 description from the hardware profile. On a host whose cores share one L3 this repeats `l3`; on a heterogeneous host (different L3 sizes per core group) it is the fact that decides whether a thread set spans one domain or two."
+        },
+        "numa": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "The NUMA layout the host exposed (`/sys/devices/system/node`): the node count, which on a Zen 2 host is the NPS setting, and each node's CPU list. Absent from manifests recorded before this field existed; null when the host exposes no nodes.",
+          "additionalProperties": false,
+          "required": [
+            "nodes"
+          ],
+          "properties": {
+            "nodes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cpulists": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

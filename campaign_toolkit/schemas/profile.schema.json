@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tensor4all.example/schemas/profile.schema.json",
+  "title": "Hardware profile",
+  "description": "A machine whose cells are only comparable with each other. Only what the toolkit reads is constrained: a campaign's inline profile may carry other keys, and a profile that declares no `smt` or `thread_rows` is unpinned.",
+  "type": "object",
+  "required": [
+    "name",
+    "cpu",
+    "logical_cpus"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "cpu": {
+      "type": "string"
+    },
+    "logical_cpus": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "role": {
+      "enum": [
+        "development",
+        "measurement"
+      ]
+    },
+    "smt": {
+      "type": "object",
+      "required": [
+        "threads_per_core",
+        "sibling_offset"
+      ],
+      "additionalProperties": false,
+      "description": "How SMT siblings are numbered: the siblings of CPU n are n mod offset + k * offset for k below threads_per_core. A statement about the enumeration, which `idle_cpus.py check --profile` compares with the live topology.",
+      "properties": {
+        "threads_per_core": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sibling_offset": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "record_numa": {
+      "type": "boolean",
+      "description": "True when the NUMA layout is not known in advance and every run must record it (host.numa)."
+    },
+    "power": {
+      "type": "object",
+      "description": "The power state wanted while measuring, as the raw strings host.power records.",
+      "properties": {
+        "cpufreq_boost": {
+          "type": "string"
+        },
+        "governor": {
+          "type": "string"
+        }
+      }
+    },
+    "thread_rows": {
+      "type": "array",
+      "description": "The thread rows the profile measures: for each, the CPUs the measured process is pinned to (one logical CPU per physical core) and the CPUs the rest of the machine, the observer, is kept on. The idle gate additionally checks the SMT siblings of the measured CPUs. An empty observer says there is no CPU left on the host for one.",
+      "items": {
+        "type": "object",
+        "required": [
+          "threads",
+          "measured",
+          "observer"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "threads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "measured": {
+            "type": "string"
+          },
+          "observer": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

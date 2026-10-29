@@ -1,0 +1,123 @@
+# The stack: which revision of each measured library the benchmark campaigns measure.
+#
+# This is the one place a version is decided. Each benchmark repository pins this toolkit
+# by revision, so the toolkit's revision also fixes the stack; the repositories' own pin
+# files are generated from here (`campaign-sync-pins`) and checked against it in CI
+# (`campaign-sync-pins --check`). `campaign-stack-status` lists, for the daily patrol, every
+# repository's pin, newest run and CI state. Validated against schemas/stack-pins.schema.json.
+#
+# `campaign_toolkit/stack/stack-pins.yaml` is the packaged copy that an installed toolkit
+# reads; a test fails if the two differ. Edit this one and copy it over.
+#
+# State recorded 2026-10-30 from the pins committed in the repositories at that date.
+schema_version: 1
+
+libraries:
+  t4a-faer:
+    repo: https://github.com/tensor4all/faer
+    crate: t4a-faer
+    version: "0.25.0"
+    tag: faer-v0.25.0
+    commit: 0e15729ad011e3813a41c168167ec61ed11a9dbb
+    note: the tensor4all fork of faer; the measured library of the faer campaign
+  faer-upstream:
+    repo: https://codeberg.org/sarah-quinones/faer
+    crate: faer
+    version: "0.24.4"
+    tag: faer-v0.24.4
+    commit: 0539947ffb757a739d7e703a7d2fa0c792a909c1
+    note: the upstream release the fork is based on (reference arm); the pin file names the tag
+  tlinalg:
+    repo: https://github.com/tensor4all/tlinalg-rs
+    crate: tlinalg
+    version: "0.6.0"
+    tag: v0.6.0
+    commit: 88a2ffeea4c5ef514dac91b2ea65d43c52b121e9
+  tcontract:
+    repo: https://github.com/tensor4all/tcontract-rs
+    crate: tcontract
+    version: "0.6.0"
+    tag: v0.6.0
+    commit: 71a11a80b454fec3e465c62dd00a6294d3254c1d
+  tcontract-v1:
+    repo: https://github.com/tensor4all/tcontract-rs
+    crate: tcontract
+    version: null
+    tag: null
+    commit: 8abfa38aa1de3bd0f55d65751afa8ce6c0a4e590
+    note: the legacy timing-v1 reference (2026-10-11, before the tcontract rename release); kept so the committed legacy pages stay current
+  cpueinsum:
+    repo: https://github.com/tensor4all/cpueinsum-rs
+    crate: cpueinsum
+    version: "0.6.0"
+    tag: v0.6.0
+    commit: 938a25fba9e76fb17dff6086db59e592f918ec22
+  einsum-corpus:
+    repo: https://github.com/tensor4all/tenferro-einsum-benchmark
+    crate: null
+    version: null
+    tag: null
+    commit: 753c0b3e8d9748115f3e921956283e64d8e0cf0f
+    note: the einsum instance corpus (14 instances) the cpueinsum campaign reads; main, there is no release
+  tenferro:
+    repo: https://github.com/tensor4all/tenferro-rs
+    crate: tenferro
+    version: "0.7.1"
+    tag: null
+    commit: 8fec1ca70852b930c092e7177c30bb8af7594a57
+    note: git dependency, 795 commits past the v0.7.1 tag (git describe v0.7.1-795-g8fec1ca7); no tag of its own
+  tensor4all-rs:
+    repo: https://github.com/tensor4all/tensor4all-rs
+    crate: tensor4all-core
+    version: null
+    tag: null
+    commit: a5157385f58048355a28a6a003d4cb63d3b1349b
+    note: git dependency of the tensor4all benchmark
+
+# The nine benchmark repositories the patrol covers. `consumes` says where each one carries
+# a pin: a `rev-file` is a `pins/<name>.rev` file (`#` comments allowed, the last other line
+# is the value: the library's `commit`, or its `tag` when `field` says so), `workflow-env` is
+# an `env` assignment `KEY: value` in a workflow file, `cargo-git-rev` is the `rev = "..."` of
+# every Cargo dependency on the library's repository. Only `rev-file` entries are written by
+# the sync tool; the others are checked and must be edited by hand. `run_dirs` are globs, below
+# the repository root, of the run directories whose names carry a timestamp.
+repositories:
+  - name: faer-benchmark
+    consumes:
+      - {kind: rev-file, file: pins/t4a-faer.rev, library: t4a-faer, field: commit}
+      - {kind: rev-file, file: pins/upstream-faer.rev, library: faer-upstream, field: tag}
+    run_dirs: [data/results/*/*/*]
+  - name: tlinalg-benchmark
+    consumes:
+      - {kind: rev-file, file: pins/tlinalg-rs.rev, library: tlinalg, field: commit}
+    run_dirs: [data/results/*/*/*]
+  - name: tcontract-benchmark
+    consumes:
+      - {kind: rev-file, file: pins/tcontract-rs-v2.rev, library: tcontract, field: commit}
+      - {kind: rev-file, file: pins/tcontract-rs.rev, library: tcontract-v1, field: commit}
+    run_dirs: [data/results/*/*/*, data/v2-results/*/*/*/*]
+  - name: cpueinsum-benchmark
+    consumes:
+      - {kind: rev-file, file: pins/cpueinsum-rs.rev, library: cpueinsum, field: commit}
+      - {kind: rev-file, file: pins/tenferro-einsum-benchmark.rev, library: einsum-corpus, field: commit}
+    run_dirs: [data/v2-results/*/*/*/*]
+  - name: tenferro-benchmark
+    consumes:
+      - {kind: workflow-env, file: .github/workflows/ci.yml, key: TENFERRO_REF, library: tenferro, field: commit}
+    run_dirs: [data/results/*/*/*/*]
+  - name: tensor4all-benchmark
+    consumes:
+      - {kind: cargo-git-rev, file: Cargo.toml, library: tensor4all-rs, field: commit}
+    run_dirs: []
+  - name: strided-rs-benchmark-suite
+    consumes: []
+    run_dirs: []
+    note: out of scope for the stack re-measurement; patrolled for CI and activity only
+  - name: tenferro-einsum-benchmark
+    consumes: []
+    run_dirs: []
+    note: the einsum corpus; frozen (archive planned), read by the cpueinsum campaign at the commit above
+  - name: campaign-toolkit
+    consumes: []
+    run_dirs: []
+    note: holds this file; a campaign's toolkit revision is the stack revision it measures under

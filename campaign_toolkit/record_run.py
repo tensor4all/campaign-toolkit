@@ -38,7 +38,7 @@ import time
 
 import yaml
 
-from . import descriptor, observer_audit
+from . import descriptor, hostinfo, observer_audit
 from .campaign import (check_cpu_sets, engines_for_vendor, populations, provider_of,
                        same_populations, vendor_engines)
 
@@ -499,23 +499,10 @@ def host_info(profile_name, profiles):
                     if line.startswith("CPU(s):")), 0)
     l3 = next((line.split(":", 1)[1].strip() for line in lscpu.splitlines()
                if line.startswith("L3 cache:")), None)
-    power = {}
-    for name, path in (("cpufreq_boost", "/sys/devices/system/cpu/cpufreq/boost"),
-                       ("intel_no_turbo", "/sys/devices/system/cpu/intel_pstate/no_turbo"),
-                       ("amd_pstate_status", "/sys/devices/system/cpu/amd_pstate/status"),
-                       ("platform_profile", "/sys/firmware/acpi/platform_profile"),
-                       ("governor", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
-                       ("energy_performance_preference",
-                        "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference"),
-                       ("scaling_max_freq_khz", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")):
-        node = pathlib.Path(path)
-        try:
-            if node.exists():
-                power[name] = node.read_text().strip()
-        except OSError:
-            pass
+    power = hostinfo.power_state()
     return {
         "power": power or None,
+        "numa": hostinfo.numa_layout(),
         # A page recorded on a development host is provisional; the same suite on a dedicated
         # measurement host produces the published dataset. The profile states which it is.
         "role": profile.get("role", "development"),
@@ -1154,6 +1141,7 @@ def main(argv=None, root=None):
         **({'toolkit': toolkit, 'verification_files': verification_files,
             'binary': {'path': str(binary), 'sha256': binary_sha256}} if v2 else {}),
         "host": host_info(args.profile, profiles),
+        "build": {"toolchain": hostinfo.toolchain()},
         "threads": {
             "counts": threads,
             "cpu_sets": cpu_sets,

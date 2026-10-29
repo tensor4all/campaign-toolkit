@@ -22,12 +22,14 @@ campaign-report-run = "campaign_toolkit.report_run:main"
 campaign-descriptor = "campaign_toolkit.campaign:main"
 campaign-validate-declarations = "campaign_toolkit.declarations:main"
 campaign-union-index = "campaign_toolkit.union_index:main"
+campaign-sync-pins = "campaign_toolkit.sync_pins:main"
+campaign-stack-status = "campaign_toolkit.stack_status:main"
 
 [tool.setuptools]
 packages = ["campaign_toolkit"]
 
 [tool.setuptools.package-data]
-campaign_toolkit = ["schemas/*.json", "profiles/*.yaml"]
+campaign_toolkit = ["schemas/*.json", "profiles/*.yaml", "stack/*.yaml"]
 
 [tool.ruff]
 line-length = 120

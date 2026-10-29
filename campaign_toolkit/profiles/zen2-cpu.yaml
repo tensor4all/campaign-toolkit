@@ -1,0 +1,41 @@
+# A hardware profile: a machine (or a well-defined container on one) whose cells
+# are only comparable with each other. See zen5-cpu.yaml for what a profile is.
+# The measurement host (tensor4all-meta#76, D5): it is measured on demand, when the stack's
+# versions move, and not on the weekly schedule.
+role: measurement
+name: zen2-cpu
+description: >-
+  AMD EPYC 7702P (Zen 2), 1 socket, 64 physical / 128 logical cores: 8 CCDs of
+  2 CCXs of 4 cores, and each CCX shares 16 MiB of L3 (16 L3 domains).
+  ASSUMED LAYOUT, standard for Linux on EPYC: CCX k holds CPUs 4k..4k+3 and the
+  SMT sibling of CPU n is n+64, so one CCD is CPUs 8j..8j+7. The assumption is
+  not trusted: `python -m campaign_toolkit.hostinfo --json` reports the host's
+  real sibling map, L3 domains and NUMA layout, and `idle_cpus.py check
+  --profile zen2-cpu` refuses (exit 4) where a live sibling list disagrees.
+  The NUMA layout (the NPS setting: 1, 2 or 4 nodes) is not known in advance
+  and must be recorded with every run (`host.numa`); numbers taken under
+  different NPS settings are not comparable. Power: boost off and governor
+  performance are wanted (D6). Switching boost needs administrator rights on a
+  server; when it cannot be switched the run records that, and the pages must
+  say so and must not be compared in absolute terms with a boost-off host.
+cpu: AMD EPYC 7702P
+logical_cpus: 128
+l3: "16 MiB shared per 4-core CCX, 16 CCXs (CPUs 4k-4k+3 and 4k+64-4k+67)"
+smt: {threads_per_core: 2, sibling_offset: 64}
+record_numa: true
+power:
+  cpufreq_boost: "0"
+  governor: performance
+# One logical CPU per physical core is measured. The observer takes the L3 domains the
+# measurement does not touch, never an SMT sibling of a measured core. The 4T row is one CCX;
+# the 8T row is one CCD, which is two CCXs, so it spans two L3 domains (the recorder warns and
+# the idle gate watches both). At 64T every physical core is measured and every SMT sibling
+# (64-127) is checked by the idle gate, so no on-host CPU is left for an observer: the empty
+# observer is deliberate. The driving agent must run off the host (or be asleep and
+# unscheduled for the whole run), because parking it on a sibling of a measured core would
+# contend with that core.
+thread_rows:
+  - {threads: 1, measured: "0", observer: "4-63,68-127"}
+  - {threads: 4, measured: "0-3", observer: "4-63,68-127"}
+  - {threads: 8, measured: "0-7", observer: "8-63,72-127"}
+  - {threads: 64, measured: "0-63", observer: ""}
