@@ -364,15 +364,33 @@ class SyncPinsTest(unittest.TestCase):
         write(other, "pins/tlinalg-rs.rev", self.stack["libraries"]["tlinalg"]["commit"] + "\n")
         self.assertEqual(sync_pins.main([str(other), "--check", "--repo", "tlinalg-benchmark"], out=io.StringIO()), 0)
 
+    def test_tenferro_pin_file_is_written_and_checked(self):
+        tenferro = self.tmp / "tenferro-benchmark"
+        commit = self.stack["libraries"]["tenferro"]["commit"]
+        write(tenferro, "pins/tenferro-rs.rev", "# measured revision\n" + "2" * 40 + "\n")
+        self.assertEqual(sync_pins.main([str(tenferro), "--check"], out=io.StringIO()), 1)
+        self.assertEqual(sync_pins.main([str(tenferro)], out=io.StringIO()), 0)
+        self.assertEqual((tenferro / "pins/tenferro-rs.rev").read_text(), f"# measured revision\n{commit}\n")
+        self.assertEqual(sync_pins.main([str(tenferro), "--check"], out=io.StringIO()), 0)
+
     def test_workflow_and_cargo_pins_are_checked_not_written(self):
+        # No shipped repository carries a workflow pin today, so the kind is checked
+        # against a stack that declares one.
+        stack_file = self.tmp / "stack.yaml"
+        stack = yaml.safe_load(stackmod.default_stack_path().read_text())
+        for repo in stack["repositories"]:
+            if repo["name"] == "tenferro-benchmark":
+                repo["consumes"] = [{"kind": "workflow-env", "file": ".github/workflows/ci.yml",
+                                     "key": "TENFERRO_REF", "library": "tenferro", "field": "commit"}]
+        stack_file.write_text(yaml.safe_dump(stack, sort_keys=False))
         tenferro = self.tmp / "tenferro-benchmark"
         commit = self.stack["libraries"]["tenferro"]["commit"]
         write(tenferro, ".github/workflows/ci.yml", f"env:\n  TENFERRO_REF: {commit}\n  TENFERRO_REF: {'2' * 40}\n")
         out = io.StringIO()
-        self.assertEqual(sync_pins.main([str(tenferro)], out=out), 1)
+        self.assertEqual(sync_pins.main([str(tenferro), "--stack", str(stack_file)], out=out), 1)
         self.assertIn("ci.yml", out.getvalue())
         write(tenferro, ".github/workflows/ci.yml", f"env:\n  TENFERRO_REF: {commit}\n")
-        self.assertEqual(sync_pins.main([str(tenferro), "--check"], out=io.StringIO()), 0)
+        self.assertEqual(sync_pins.main([str(tenferro), "--check", "--stack", str(stack_file)], out=io.StringIO()), 0)
         t4a = self.tmp / "tensor4all-benchmark"
         rs = self.stack["libraries"]["tensor4all-rs"]["commit"]
         write(t4a, "Cargo.toml", f'a = {{ git = "https://github.com/tensor4all/tensor4all-rs", rev = "{rs}" }}\n')

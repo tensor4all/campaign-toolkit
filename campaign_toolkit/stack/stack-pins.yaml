@@ -105,7 +105,7 @@ repositories:
     run_dirs: [data/v2-results/*/*/*/*]
   - name: tenferro-benchmark
     consumes:
-      - {kind: workflow-env, file: .github/workflows/ci.yml, key: TENFERRO_REF, library: tenferro, field: commit}
+      - {kind: rev-file, file: pins/tenferro-rs.rev, library: tenferro, field: commit}
     run_dirs: [data/results/*/*/*/*]
   - name: tensor4all-benchmark
     consumes:
