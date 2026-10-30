@@ -117,6 +117,22 @@ def vendor_of_engines(engines) -> "str | None":
     return vendors[0] if len(vendors) == 1 else None
 
 
+def _cpu_count(cpus) -> int:
+    return sum((int(p.split("-")[1]) - int(p.split("-")[0]) + 1) if "-" in str(p) else 1
+               for p in str(cpus).split(","))
+
+
+def _check_pairs(threads, sets, where) -> None:
+    if len(threads) != len(sets):
+        raise SystemExit(f"ERROR: this suite declares {len(threads)} thread budgets {threads} but "
+                         f"{len(sets)} cpu sets {sets}{where}; they are paired by position")
+    for budget, cpus in zip(threads, sets):
+        if _cpu_count(cpus) < int(budget):
+            raise SystemExit(f"ERROR: the {budget}-thread budget is paired with cpu set {cpus!r}"
+                             f"{where}, which holds {_cpu_count(cpus)} cpu(s); threads on fewer cpus "
+                             f"than the budget measure something other than the declared budget")
+
+
 def check_cpu_sets(suite: dict) -> None:
     """Refuse a declaration whose CPU sets cannot hold the thread budgets it pairs them with.
 
@@ -124,22 +140,47 @@ def check_cpu_sets(suite: dict) -> None:
     the set at index i. Two mistakes are silent without this check and both produce a run that
     measures less than it claims - a list shorter than the budgets (an index error, or the wrong
     budget pinned), and a set with fewer CPUs than the budget it is paired with, which is what an
-    8-thread arm pinned to one core looks like in the manifest.
+    8-thread arm pinned to one core looks like in the manifest. A per-profile mapping is checked
+    list by list.
     """
     spec = run_spec(suite)
     threads, sets = spec.get("threads", []), spec.get("cpu_sets", [])
-    if len(threads) != len(sets):
-        raise SystemExit(f"ERROR: this suite declares {len(threads)} thread budgets {threads} but "
-                         f"{len(sets)} cpu sets {sets}; they are paired by position")
-    for budget, cpus in zip(threads, sets):
-        count = sum(len(range(*map(int, part.split("-")))) if "-" in str(part)
-                    else 1 for part in str(cpus).split(","))
-        count = sum((int(p.split("-")[1]) - int(p.split("-")[0]) + 1) if "-" in str(p) else 1
-                    for p in str(cpus).split(","))
-        if count < int(budget):
-            raise SystemExit(f"ERROR: the {budget}-thread budget is paired with cpu set {cpus!r}, "
-                             f"which holds {count} cpu(s); threads on fewer cpus than the budget "
-                             f"measure something other than the declared budget")
+    if isinstance(sets, dict):
+        for profile, listed in sets.items():
+            _check_pairs(threads, listed, f" for {profile}")
+    else:
+        _check_pairs(threads, sets, "")
+
+
+def cpu_sets_for(suite: dict, profile: dict, threads) -> tuple:
+    """`({str(threads): measured CPUs}, source)` for a run of `suite` on `profile`.
+
+    The machine decides where a thread row runs, so a profile that declares `thread_rows` pins
+    the rows by itself. The suite may still say otherwise for one profile: a mapping entry named
+    after the profile wins. A suite that declares one list for every profile (the form written
+    before profiles carried rows) keeps it on every profile, so no recorded campaign moves its
+    CPUs when the toolkit does; `declarations` asks such a suite to name its profile once it
+    lists more than one. `source` says which of the three decided.
+    """
+    spec = run_spec(suite)
+    declared, sets = list(spec["threads"]), spec.get("cpu_sets", [])
+    if isinstance(sets, dict) and profile["name"] in sets:
+        listed = sets[profile["name"]]
+        return ({str(t): listed[declared.index(t)] for t in threads},
+                f"the suite's cpu_sets for {profile['name']}")
+    if not isinstance(sets, dict):
+        return {str(t): sets[declared.index(t)] for t in threads}, "the suite's cpu_sets"
+    rows = {row["threads"]: row["measured"] for row in profile.get("thread_rows", [])}
+    if not rows:
+        raise SystemExit(f"ERROR: the suite's cpu_sets name no list for {profile['name']!r}, and that "
+                         f"profile declares no thread_rows; add {profile['name']} to the suite's "
+                         f"cpu_sets or rows to the profile")
+    missing = [t for t in threads if t not in rows]
+    if missing:
+        raise SystemExit(f"ERROR: profile {profile['name']!r} declares thread rows for "
+                         f"{sorted(rows)} but not for {missing}; a row the machine does not declare "
+                         f"has no CPUs to run on")
+    return {str(t): rows[t] for t in threads}, f"the thread_rows of {profile['name']}"
 
 
 def engines_for_vendor(suite: dict, vendor: str) -> list:

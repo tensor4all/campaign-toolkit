@@ -39,7 +39,7 @@ import time
 import yaml
 
 from . import descriptor, hostinfo, observer_audit
-from .campaign import (check_cpu_sets, engines_for_vendor, populations, provider_of,
+from .campaign import (check_cpu_sets, cpu_sets_for, engines_for_vendor, populations, provider_of,
                        same_populations, vendor_engines)
 
 
@@ -884,7 +884,10 @@ def main(argv=None, root=None):
                 if args.external_provider_json else [])
     require_external_identities(engines, external)
     check_cpu_sets(suite)
-    cpu_sets = {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
+    cpu_sets, cpu_source = cpu_sets_for(suite, next(p for p in profiles if p["name"] == args.profile),
+                                        threads)
+    print(f"cpu sets from {cpu_source}: "
+          + ", ".join(f"{t}T {c}" for t, c in cpu_sets.items()), file=sys.stderr)
     warn_if_measured_cpus_span_l3_domains(cpu_sets)
     require_observer_off_measured_cpus(cpu_sets)
     require_quiet_observing_side(cpu_sets)

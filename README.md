@@ -65,6 +65,44 @@ list of `{name, version, commit, path, note, tag, sha256}`, merged into the mani
 and printed on the page's provenance section independently of Cargo-dependency provenance, so an
 external baseline's revision is visible even when it is not a Cargo dependency.
 
+### Which CPUs a thread row runs on
+
+A suite's `cpu_sets` pairs each of its `threads` with the measured CPUs, by position. It is
+either one list or a mapping from a profile name to a list:
+
+```yaml
+runs:
+  - threads: [1, 4, 8]
+    cpu_sets:
+      zen5-cpu: ["4", "4-7", "4-11"]   # this suite's choice on zen5-cpu
+    # zen2-cpu is not named, so its own thread_rows decide: 1T 0, 4T 0-3, 8T 0-7
+```
+
+`record_run` takes, for the run's profile, the suite's entry for that profile; else, when
+`cpu_sets` is one list, that list (on every profile, as before mappings existed); else the
+profile's `thread_rows`, and a thread count the profile has no row for is refused. It prints
+which of the three decided. One list cannot be right on two machines, so `declarations`
+fails a suite whose single list serves more than one profile, and names the mapping to write
+instead: the list goes under the profile it was written for, and the CPUs it records there do
+not change.
+
+### Before recording on a new host
+
+Three things the first `zen2-cpu` smoke (tensor4all-meta#76, 3.3) had to learn:
+
+- **Confine the observing side, every thread of it.** The recorder refuses an observing
+  process that may run inside a measured L3 domain. `taskset -pc <observer> <pid>` moves one
+  thread only: an agent's other threads stay on the measured cores and the audit names them.
+  Use `taskset -apc <observer> <pid>` (all threads) on the driving agent, then
+  `python3 -m campaign_toolkit.observer_audit --observer <observer> --confine` for the rest.
+- **Timing v2 needs `--aa` at least the engine count, and a multiple of it.** One process set
+  per engine-order rotation: with three engine rows (`--vendor openblas` in faer) `--aa 2` is
+  refused and `--aa 3` passes; with two rows, `--aa 2` or `4`.
+- **`--shapes` must cover the suite's `verify` grid.** A suite's `verify.n` may narrow the
+  shapes the verify runs on, never widen them, so a `--shapes` filter that leaves out a shape
+  `verify.n` names is refused. A smoke asks for the `verify.n` shapes (tlinalg: `4,8,16`), not
+  for one shape.
+
 ## Hardware profiles
 
 A profile is a fact about a machine, not about a campaign, so the library lives
@@ -89,7 +127,8 @@ A profile may also declare `smt` (how SMT siblings are numbered) and `thread_row
 thread count, the measured CPUs and the observer's CPUs). `zen5-cpu` and `zen2-cpu` (EPYC
 7702P, 64C/128T, measurement role) do. `campaign-validate-declarations` checks the rows
 (a measured core appears once; the observer shares no CPU with a measured core or its SMT
-siblings), and the idle gate and `pinned.sh` read them:
+siblings), and the idle gate, `pinned.sh` and `record_run` (for a suite that does not name
+the profile in its `cpu_sets`, above) read them:
 
 ```bash
 benchmarks/scripts/pinned.sh --dry-run --profile zen2-cpu --threads 4   # prints, runs nothing
