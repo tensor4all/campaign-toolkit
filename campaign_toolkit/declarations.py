@@ -16,6 +16,47 @@ from . import descriptor, jsonschema_lite
 from .campaign import load
 
 
+def cpu_set(text) -> set:
+    cpus = set()
+    for part in str(text).split(","):
+        if part.strip():
+            low, _, high = part.partition("-")
+            cpus.update(range(int(low), int(high or low) + 1))
+    return cpus
+
+
+def check_profile(profile) -> list:
+    """Problems with one hardware profile: the schema, then its thread rows against its SMT layout.
+
+    A row must name as many measured CPUs as it has threads, never two hardware threads of one
+    core, and an observer that shares no CPU with a measured core or its SMT siblings.
+    """
+    schema = json.loads((descriptor.schemas_dir() / "profile.schema.json").read_text())
+    name = profile.get("name", "?")
+    try:
+        jsonschema_lite.validate(profile, schema)
+    except jsonschema_lite.ValidationError as exc:
+        return [f"profile {name}: {exc.json_path}: {exc.message}"]
+    smt = profile.get("smt") or {"threads_per_core": 1, "sibling_offset": profile["logical_cpus"]}
+    offset, everything = smt["sibling_offset"], set(range(profile["logical_cpus"]))
+    problems = []
+    for row in profile.get("thread_rows", []):
+        measured, observer = cpu_set(row["measured"]), cpu_set(row["observer"])
+        where = f"profile {name}: {row['threads']}T row"
+        cores = [cpu % offset for cpu in measured]
+        if len(measured) != row["threads"]:
+            problems.append(f"{where}: {len(measured)} measured CPUs for {row['threads']} threads")
+        if len(set(cores)) != len(cores):
+            problems.append(f"{where}: two hardware threads of one core are measured")
+        if not (measured | observer) <= everything:
+            problems.append(f"{where}: a CPU is outside 0-{profile['logical_cpus'] - 1}")
+        checked = {c % offset + k * offset for c in measured for k in range(smt["threads_per_core"])}
+        if observer & checked:
+            problems.append(f"{where}: the observer shares CPUs {sorted(observer & checked)} with the "
+                            f"measured cores or their SMT siblings")
+    return problems
+
+
 def check(root, out=None) -> list:
     out = out or sys.stdout
     d = descriptor.set_root(root)
@@ -55,6 +96,8 @@ def check(root, out=None) -> list:
         for profile in suite["required_profiles"] + suite.get("optional_profiles", []):
             if profile not in profiles:
                 problems.append(f"{path}: unknown profile {profile!r}")
+    for profile in d.profiles():
+        problems.extend(check_profile(profile))
     if not problems:
         print(f"declarations ok: {len(suites)} suite(s) under {d.root}", file=out)
     for problem in problems:

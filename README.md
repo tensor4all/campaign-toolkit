@@ -49,8 +49,8 @@ CAMPAIGN_ROOT=/path/to/campaign python3 -m campaign_toolkit.gen_index --check
 Console entry points (`campaign-record-run`, `campaign-validate-run`,
 `campaign-gen-index`, `campaign-publish-report`, `campaign-compare-runs`,
 `campaign-report-run`, `campaign-descriptor`,
-`campaign-validate-declarations`, `campaign-union-index`) are declared in
-`pyproject.toml`.
+`campaign-validate-declarations`, `campaign-union-index`, `campaign-sync-pins`,
+`campaign-stack-status`) are declared in `pyproject.toml`.
 
 ## Recording a run
 
@@ -83,6 +83,46 @@ profiles:
 Editing a shared profile therefore reaches every campaign that measures it; the
 run manifest still records what the host actually reported, so a recorded run is
 unaffected by a later profile edit.
+
+A profile may also declare `smt` (how SMT siblings are numbered) and `thread_rows` (per
+thread count, the measured CPUs and the observer's CPUs). `zen5-cpu` and `zen2-cpu` (EPYC
+7702P, 64C/128T, measurement role) do. `campaign-validate-declarations` checks the rows
+(a measured core appears once; the observer shares no CPU with a measured core or its SMT
+siblings), and the idle gate and `pinned.sh` read them:
+
+```bash
+benchmarks/scripts/pinned.sh --dry-run --profile zen2-cpu --threads 4   # prints, runs nothing
+benchmarks/scripts/pinned.sh --profile zen2-cpu --threads 4 -- COMMAND  # the measured set from the row
+```
+
+The dry run prints the `taskset` line, the measured CPUs, the CPUs the idle gate checks (SMT
+siblings included) and the observer's CPUs. Without `--profile` the siblings and the observer
+come from the live topology, and `pinned.sh CPUS -- COMMAND` works as before.
+
+## The stack
+
+`stack/stack-pins.yaml` says which revision of each measured library the campaigns measure
+(`{crate, version, tag, commit}`, git dependencies by commit) and which benchmark repository
+carries which pin. A repository's `pins/*.rev` are generated from it, and CI checks them:
+
+```bash
+campaign-sync-pins                # write pins/*.rev of the repository in the cwd (comments are kept)
+campaign-sync-pins --check        # write nothing; exit 1 naming each pin that is missing or differs
+campaign-stack-status             # the daily patrol: one Markdown row per repository (pins, newest run, CI)
+```
+
+`campaign_toolkit/stack/stack-pins.yaml` is the copy an installed toolkit reads (`--stack`
+overrides it); a test fails if it differs from `stack/stack-pins.yaml`, which is the one to edit.
+`campaign-stack-status` looks for the checkouts beside the toolkit checkout (`--checkouts DIR`),
+asks `gh` for the CI state of `main`, and fills a cell it cannot with a reason.
+
+## Host information
+
+`python -m campaign_toolkit.hostinfo --json` prints what decides whether two measurements are
+comparable: boost, governor, amd-pstate mode, platform profile, SMT, the NUMA layout (a Zen 2
+host's NPS setting), the SMT sibling map, the L3 domains, and the toolchain. A missing sysfs
+file is `null`. `record_run` writes `host.power.smt`, `host.numa` and `build.toolchain` from it
+into every new manifest; they are optional in the schema, so older manifests still validate.
 
 ## The result index, the history and the site
 
@@ -164,6 +204,7 @@ publishing a numerical page.
 | `campaign_toolkit/schemas/` | the packaged copies of the schemas, used at runtime and by an installed wheel |
 | `campaign_toolkit/profiles/` | the shared hardware profile library a campaign opts into by name |
 | `schemas/` | the same schemas for review; a test fails if the two copies differ |
+| `stack/` | the stack pins (`stack-pins.yaml`); `campaign_toolkit/stack/` is the packaged copy, kept equal by a test |
 | `benchmarks/scripts/` | the pinned, idle-checked timing protocol, copied from the measured library |
 | `tests/fixture/` | a synthetic campaign: declarations and two runs, no build |
 | `docs/extraction.md` | provenance: what was taken from where, at which commit |
@@ -172,4 +213,5 @@ publishing a numerical page.
 
 `.github/workflows/ci.yml` is content-only — the measurement itself runs on the
 host that owns the numbers. It validates the descriptor and suite schemas
-against the fixture, compiles every module, and runs the self-test in `tests/`.
+against the fixture, validates the stack file, compiles every module, resolves every profile
+row with `pinned.sh --dry-run`, and runs the self-test in `tests/`.

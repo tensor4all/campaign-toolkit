@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tensor4all.example/schemas/stack-pins.schema.json",
+  "title": "Stack pins",
+  "description": "Which revision of each measured library the benchmark campaigns measure, and which benchmark repository carries which pin. The repositories' pin files are generated from this and checked against it.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "libraries",
+    "repositories"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "libraries": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "repo",
+          "crate",
+          "version",
+          "tag",
+          "commit"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "Where the library's source lives."
+          },
+          "crate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The crates.io package, null for a source that is not a crate."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The release tag the commit carries, null when it carries none."
+          },
+          "commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "The full revision. A git dependency is pinned by this."
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "consumes",
+          "run_dirs"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "consumes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "file",
+                "library",
+                "field"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "rev-file",
+                    "workflow-env",
+                    "cargo-git-rev"
+                  ],
+                  "description": "rev-file: a pins/<name>.rev file the sync tool writes. workflow-env: `KEY: value` in a workflow file. cargo-git-rev: the rev of each Cargo git dependency on the library's repository. The last two are checked, not written."
+                },
+                "file": {
+                  "type": "string",
+                  "description": "Relative to the repository root; a rev-file lives under pins/ and ends in .rev."
+                },
+                "library": {
+                  "type": "string",
+                  "description": "A key of `libraries`."
+                },
+                "field": {
+                  "enum": [
+                    "commit",
+                    "tag"
+                  ],
+                  "description": "Which of the library's fields the file holds."
+                },
+                "key": {
+                  "type": "string",
+                  "description": "workflow-env only: the variable name."
+                }
+              }
+            }
+          },
+          "run_dirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Globs, below the repository root, of the run directories; their names carry a timestamp."
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

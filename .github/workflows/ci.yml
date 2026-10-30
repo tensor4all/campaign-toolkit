@@ -16,8 +16,16 @@ jobs:
         run: python3 -m pip install --quiet -e .
       - name: Descriptor and suite declarations are well formed
         run: python3 -m campaign_toolkit.declarations --root tests/fixture
+      - name: The stack pins are well formed (root copy and packaged copy)
+        run: |
+          python3 -m campaign_toolkit.stack stack/stack-pins.yaml
+          python3 -m campaign_toolkit.stack
       - name: Every module compiles
-        run: python3 -m py_compile campaign_toolkit/*.py tests/test_toolkit.py
+        run: python3 -m py_compile campaign_toolkit/*.py tests/test_toolkit.py tests/test_stack_hostinfo.py
+      - name: The pinned-run protocol resolves every profile row (dry run, nothing is measured)
+        run: |
+          for t in 1 4 8 64; do benchmarks/scripts/pinned.sh --dry-run --profile zen2-cpu --threads "$t"; done
+          for t in 1 4 8; do benchmarks/scripts/pinned.sh --dry-run --profile zen5-cpu --threads "$t"; done
       - name: Self-test against the fixture campaign
         run: python3 -m unittest discover -s tests -v
       - name: Ruff

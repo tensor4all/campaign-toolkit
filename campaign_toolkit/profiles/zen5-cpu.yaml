@@ -17,3 +17,12 @@ description: >-
 cpu: AMD Ryzen AI 9 HX 470
 logical_cpus: 24
 l3: "0-3: 16 MiB shared; 4-11: 8 MiB shared"
+# SMT siblings of CPU n are n+12 (`lscpu -e`); the idle gate and the thread rows below derive from this.
+smt: {threads_per_core: 2, sibling_offset: 12}
+# One logical CPU per physical core is measured, so SMT never inflates a row, and the observer
+# (whatever else runs, e.g. the agent that drives the run) stays on the other L3 domain, never on
+# an SMT sibling of a measured core.
+thread_rows:
+  - {threads: 1, measured: "0", observer: "4-11,16-23"}
+  - {threads: 4, measured: "0-3", observer: "4-11,16-23"}
+  - {threads: 8, measured: "4-11", observer: "0-3,12-15"}
