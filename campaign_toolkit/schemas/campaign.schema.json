@@ -351,6 +351,110 @@
         "minLength": 1
       }
     },
+    "trend": {
+      "description": "The representative cases a trend chart follows across pins (`campaign_toolkit.trend`). One chart per entry: a panel per thread budget, a line per engine and measurement condition.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "suite",
+          "case",
+          "engines",
+          "threads"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "suite": {
+            "type": "string",
+            "minLength": 1
+          },
+          "case": {
+            "description": "The case key as the trend points name it: `<family>/<dims>/b<batch> <dtype>` plus the declared case axes, the way the report prints the case.",
+            "type": "string",
+            "minLength": 1
+          },
+          "engines": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "threads": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "vendor": {
+            "description": "Only points of this vendor arm (for an engine measured in several arms' binaries).",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "figures": {
+      "description": "The charts the site generates from the recorded runs at deploy time (`campaign_toolkit.figures`), instead of committing them.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "throughput": {
+          "description": "Size-against-throughput charts (`campaign_toolkit.throughput`): the chart config, and the (suite, vendor arm) whose current page's run fills each run position the config's series name.",
+          "type": "object",
+          "required": [
+            "config",
+            "runs"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "config": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "suite"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "suite": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "cases": {
+          "description": "Suites whose current pages each get a case dot plot: every case of the run against a log time axis, one marker per engine, one panel per thread budget.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
     "report": {
       "description": "The strings the generated index and report headers print.",
       "type": "object",

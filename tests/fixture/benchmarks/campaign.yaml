@@ -75,3 +75,14 @@ report:
   harness_label: harness commit
   index_generator: scripts/gen_index.py
   setup_script: scripts/setup_extern_deps.sh
+
+# The charts the site generates at deploy time: a case dot plot of each current page's run, and
+# one representative case followed across pins.
+figures:
+  cases: [fixture-kernels]
+
+trend:
+  - suite: fixture-kernels
+    case: small:mul/n8/b1 f64
+    engines: [algo-lane, blas-openblas]
+    threads: [1]

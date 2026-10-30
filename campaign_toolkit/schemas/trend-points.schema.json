@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tensor4all.example/schemas/trend-points.schema.json",
+  "title": "Trend points",
+  "description": "The exchange format between a benchmark repository and the toolkit's trend chart. One point is the median time of one case, engine and thread budget in one recorded run, with the conditions it was measured under. The chart joins only points whose campaign, suite, case, engine, threads, profile, timing_policy, power and vendor are all equal.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "points"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "campaign",
+          "suite",
+          "case_key",
+          "engine",
+          "threads",
+          "profile",
+          "library_version",
+          "library_commit",
+          "timing_policy",
+          "power",
+          "median",
+          "spread",
+          "unit",
+          "run_id",
+          "timestamp"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "campaign": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The campaign (descriptor id, or the repository's own name)."
+          },
+          "suite": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The suite the run measured."
+          },
+          "case_key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The case as the published page names it; a `trend:` entry selects points by this string."
+          },
+          "engine": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The engine row."
+          },
+          "threads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "profile": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The hardware profile the run was recorded on."
+          },
+          "library_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The measured library's version, null when the run recorded none."
+          },
+          "library_commit": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The measured library's commit: the pin a point belongs to."
+          },
+          "timing_policy": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The timing contract, e.g. `v1` or `v2`; points of different contracts are never joined."
+          },
+          "power": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The recorded power state, e.g. `boost off, performance`, or `unrecorded`; points of different states are never joined."
+          },
+          "vendor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The vendor arm of the run (the BLAS/LAPACK library its binary linked), null or absent when the run has none; points of different arms are never joined."
+          },
+          "median": {
+            "type": "number",
+            "minimum": 0,
+            "description": "The median over process starts (each a median of its own samples under v2)."
+          },
+          "spread": {
+            "type": "number",
+            "minimum": 0,
+            "description": "The between-start sample SD of those process medians; 0 for one start."
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The run directory (or record) the point came from."
+          },
+          "timestamp": {
+            "type": "string",
+            "minLength": 1,
+            "description": "When the run was recorded (ISO 8601); orders the points and places them on the week axis."
+          }
+        }
+      }
+    }
+  }
+}

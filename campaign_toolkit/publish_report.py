@@ -17,6 +17,13 @@ from . import descriptor
 from .campaign import coverage_of, find_suite, load, page_relative, page_source
 
 
+def page_header(run_rel):
+    """The first lines of a published page: the run it is a copy of (`campaign.page_source` reads
+    it back, and `check_generated` rebuilds the page from it)."""
+    return (f"<!-- generated from {pathlib.PurePosixPath(run_rel)}/report.md "
+            f"by scripts/publish_report.py; the report below is the source of truth -->\n\n")
+
+
 def page_path(manifest):
     """The page this run would be published to. The rule lives in `campaign.py`, with the
     index that has to agree with it.
@@ -57,8 +64,7 @@ def publish(run_dir):
     report = page_path(manifest)
     report.parent.mkdir(parents=True, exist_ok=True)
     covers = coverage_of(suite, manifest) == "full"
-    header = (f"<!-- generated from {run_dir.relative_to(d.root)}/report.md "
-              f"by scripts/publish_report.py; the report below is the source of truth -->\n\n")
+    header = page_header(run_dir.relative_to(d.root))
     if covers or not report.exists():
         report.write_text(header + (run_dir / "report.md").read_text())
         print(f"published {report.relative_to(d.root)} from {run_dir.relative_to(d.root)} "
