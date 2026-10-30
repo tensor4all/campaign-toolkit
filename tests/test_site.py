@@ -156,5 +156,20 @@ class History(unittest.TestCase):
             self.assertIn(f'{base}/commit/{sha2}', hist)
 
 
+class GeneratedFilesAreNotRecords(unittest.TestCase):
+    def test_an_index_or_history_commit_is_not_a_publication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, suite = _campaign(tmp, NEW)
+            _stamped(suite / f'{NEW}-mkl-timing-v2.md', '2026-10-20T00:00:00Z')
+            _commit(root, 'record', '2026-10-20T08:00:00+00:00')
+            (root / 'result' / 'INDEX.md').write_text('# index\n')
+            (root / 'result' / 'HISTORY.md').write_text('# history\n')
+            _commit(root, 'regenerate the index and history', '2026-10-21T08:00:00+00:00')
+            entries = site.history_pages(root, 'result')
+            self.assertEqual([e['subject'] for e in entries], ['record'])
+            _site(root)
+            self.assertNotIn('HISTORY', (root / 'result' / 'index.html').read_text())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -2,16 +2,22 @@
 
     python -m campaign_toolkit.site --root <campaign> --site <dir> [--pin pins/x.rev]...
 
-A result page is Markdown; a browser shows it as text. This writes the one HTML page a
-campaign's site serves: the latest generation of results only, the throughput charts when
-the campaign has them, and whatever extra section the campaign passes (a joined
-comparison, for instance).
+A result page is Markdown; a browser shows it as text. This writes the campaign's site: an
+HTML copy of every result page (converted with the `markdown` package, beside the `.md`, with
+the GitHub blob as its "source" link), the landing page `index.html`, and `history.html`.
 
-Latest generation: for each (suite, vendor arm) the one page recorded at the campaign's
-pin on the newest hardware profile. A (suite, arm) with no page at the pin is not linked at
-all: the page names it in one plain line. Older pages are never linked from the landing
-page; its one link to them is `history.html` (see `history_pages`). A campaign with no pin file has no notion of "at the pin", so
-every (suite, arm) shows its newest page.
+The landing page has one section per hardware profile, in the order of the campaign's
+`benchmarks/profiles.yaml`. A section opens with one summary line (the pinned revisions, the
+measurement dates, the power state and the toolchain of its pages' runs), then links the page
+of each (suite, vendor arm) recorded at the pins, then names in one line the cells that have
+no page at the pins. Which page is current is the result index's own rule
+(`gen_index.split_pages`): the site and `INDEX.md` agree by construction, and every other page
+is listed in `history.html` exactly as `HISTORY.md` lists it.
+
+A site root that is not a campaign's result directory (no descriptor) falls back to file
+names: a page is at the pin when its name starts with the pinned revision, and each
+(profile, suite, arm) links its newest such page. With no pin file every (profile, suite, arm)
+shows its newest page.
 
 It is a view over committed artifacts. It does not measure, and it does not decide
 anything: a page it lists is a page that exists under the site root.
@@ -36,6 +42,8 @@ th{background:#f5f5f5}
 .charts figure{margin:0}
 .charts img{width:100%;height:auto;border:1px solid #eee;background:#fff}
 .charts figcaption{font-size:.85rem;color:#444;margin-top:.25rem}
+.summary{background:#f7f7f7;padding:.4rem .6rem;border-left:3px solid #ccc}
+nav{font-size:.9em;margin-bottom:1rem}
 """
 
 
@@ -68,9 +76,12 @@ def _pin_revisions(root, pins):
     return revisions
 
 
+GENERATED = ('INDEX.md', 'HISTORY.md', 'README.md')
+
+
 def _pages(site_root):
     pages = [p for p in site_root.rglob('*.md')
-             if p.name not in ('INDEX.md', 'README.md') and not p.name.startswith('index')
+             if p.name not in GENERATED and not p.name.startswith('index')
              # chart data tables belong to their chart, not to the page list
              and 'throughput' not in p.parts]
     return sorted(pages)
@@ -94,38 +105,30 @@ def _recorded(page):
 
 
 def current_pages(site_root, revisions):
-    """Latest generation: ([page, ...], [missing]) one page per (suite, arm), sorted by path.
+    """File-name fallback: ([page, ...], [missing]) one page per (profile, suite, arm).
 
-    Newest profile = the profile of the newest recorded page on the site. Within a
-    (suite, arm) that has pages on it, only that profile is considered; the page at a
-    pinned revision is the one linked, the newest recording breaking a remaining tie. A
-    (suite, arm) with no page at the pin is returned in `missing` as (suite name, arm).
-    With no pinned revision at all, the newest page of each (suite, arm) is linked.
+    The page at a pinned revision is the one linked, the newest recording breaking a tie. A
+    (profile, suite, arm) with no page at the pin is returned in `missing` as
+    (profile, suite name, arm). With no pinned revision at all, the newest page of each
+    (profile, suite, arm) is linked.
     """
     def at_pin(page):
         return not revisions or any(page.name.startswith(rev[:12]) for rev in revisions)
 
-    entries = []
+    groups = {}
     for page in _pages(site_root):
         parts = page.relative_to(site_root).parts
         profile = parts[-3] if len(parts) >= 3 else ''
         suite = parts[:-3] + parts[-2:-1] if len(parts) >= 3 else parts[:-1]
         stamp = (_recorded(page), page.stat().st_mtime)
-        entries.append((page, (suite, _arm(page)), profile, at_pin(page), stamp))
-    if not entries:
-        return [], []
-    newest_profile = max(entries, key=lambda e: e[4])[2]
-    groups = {}
-    for entry in entries:
-        groups.setdefault(entry[1], []).append(entry)
+        groups.setdefault((profile, suite, _arm(page)), []).append((page, at_pin(page), stamp))
     chosen, missing = [], []
-    for (suite, arm), group in sorted(groups.items()):
-        pinned = [e for e in group if e[3]]
-        pool = [e for e in pinned if e[2] == newest_profile] or pinned
-        if pool:
-            chosen.append(max(pool, key=lambda e: e[4])[0])
+    for (profile, suite, arm), group in sorted(groups.items()):
+        pinned = [e for e in group if e[1]]
+        if pinned:
+            chosen.append(max(pinned, key=lambda e: e[2])[0])
         else:
-            missing.append((suite[-1] if suite else '', arm))
+            missing.append((profile, suite[-1] if suite else '', arm))
     return sorted(chosen), missing
 
 
@@ -133,7 +136,7 @@ def _is_record(rel):
     """Whether a path (relative to the site root) is a record page: the same filter as `_pages`,
     plus the comparison HTML pages."""
     path = pathlib.PurePosixPath(rel)
-    if 'throughput' in path.parts or path.name in ('INDEX.md', 'README.md'):
+    if 'throughput' in path.parts or path.name in GENERATED:
         return False
     if path.name.startswith(('index', 'history')):
         return False
@@ -219,12 +222,31 @@ def _record_lists(blob, sha, paths, site_rel):
         for suite, group in _group_by_suite(paths, site_rel))
 
 
-def write_history(root, site_root, title):
-    """Write `<site_root>/history.html`; returns its path, or None with no publication history."""
+def _older_section(site_root, older):
+    """The pages of the tree that the landing does not show, as links to their HTML copies."""
+    if not older:
+        return ''
+    items = []
+    for page in older:
+        rel = page.relative_to(site_root)
+        items.append(f'<li><a href="{html.escape(str(rel.with_suffix(".html")))}">'
+                     f'{html.escape(str(rel))}</a></li>')
+    return (f'<h2 class="older">Older pages in this tree ({len(older)})</h2>\n'
+            '<p class="muted">Every result page in the tree that the landing page does not show, newest '
+            'first: the same list as <code>HISTORY.md</code>.</p>\n'
+            f'<ul class="older">{"".join(items)}</ul>\n')
+
+
+def write_history(root, site_root, title, older=()):
+    """Write `<site_root>/history.html`; returns its path, or None with nothing to list.
+
+    `older` is the list of pages in the tree the landing does not show (newest first); it
+    comes first, then the log of publication commits.
+    """
     site_rel = site_root.relative_to(root).as_posix()
     blob = _blob_base(root)
     entries = history_pages(root, site_rel)
-    if not entries:
+    if not entries and not older:
         return None
     sections = []
     for e in entries:
@@ -253,6 +275,7 @@ def write_history(root, site_root, title):
 <p class="muted">Each entry is a publication commit on the main branch, newest first, with the
 records present at that commit. Links are permanent: they point at the commit.
 <a href="index.html">Back to the current results</a>.</p>
+{_older_section(site_root, older)}
 {''.join(sections)}
 </body></html>
 """)
@@ -261,12 +284,129 @@ records present at that commit. Links are permanent: they point at the commit.
 
 
 def _missing_line(missing):
+    """One line naming the (suite, arm) cells with no page at the pin."""
     by_suite = {}
     for suite, arm in missing:
         by_suite.setdefault(suite, []).append(arm)
     names = [f"{suite} ({', '.join(a for a in arms if a)})" if any(arms) else suite
              for suite, arms in sorted(by_suite.items())]
     return 'Not recorded at the current pin: ' + ', '.join(names)
+
+
+def _load_yaml(path):
+    import yaml
+    try:
+        return yaml.safe_load(pathlib.Path(path).read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def _toolchain(run_dir):
+    """The first line of the `rustc` the run's build recorded, '' when it has none."""
+    import json
+    try:
+        info = json.loads((pathlib.Path(run_dir) / 'build-info.json').read_text())
+    except (OSError, ValueError):
+        return ''
+    rustc = info.get('rustc') if isinstance(info, dict) else None
+    return rustc.splitlines()[0].strip() if isinstance(rustc, str) and rustc.strip() else ''
+
+
+def _power(run_dir):
+    """`boost off, governor performance` from the manifest's `host.power`, '' when unrecorded."""
+    power = ((_load_yaml(pathlib.Path(run_dir) / 'run.yaml').get('host') or {}).get('power') or {})
+    parts = []
+    boost = power.get('cpufreq_boost')
+    if boost is not None:
+        parts.append({'0': 'boost off', '1': 'boost on'}.get(str(boost), f'boost {boost}'))
+    if power.get('governor'):
+        parts.append(f"governor {power['governor']}")
+    return ', '.join(parts)
+
+
+def _joined(values, none='not recorded'):
+    values = sorted({v for v in values if v})
+    return '; '.join(values) if values else none
+
+
+def profile_summary(rows, dual):
+    """One line: pinned revisions, measurement dates, power state, toolchain of `rows`' runs."""
+    if not rows:
+        return 'Nothing recorded at the current pin on this profile.'
+    pins = []
+    for r in rows:
+        pin = f"{r['version'] or '-'} <code>{html.escape(r['commit'])}</code>"
+        if dual:
+            upstream = r.get('upstream_ref') or r.get('upstream_version') or '-'
+            pin += f" (upstream {html.escape(str(upstream))} <code>{html.escape(r['upstream'] or '-')}</code>)"
+        pins.append(pin)
+    dates = sorted(r['date'] for r in rows)
+    when = dates[0] if dates[0] == dates[-1] else f'{dates[0]} to {dates[-1]}'
+    power = _joined(_power(r['run_dir']) for r in rows if r.get('run_dir'))
+    toolchain = _joined(_toolchain(r['run_dir']) for r in rows if r.get('run_dir'))
+    return (f"pin: {'; '.join(sorted(set(pins)))} &middot; measured: {when} &middot; "
+            f"power: {html.escape(power)} &middot; toolchain: {html.escape(toolchain)}")
+
+
+def campaign_root(start):
+    """The campaign whose descriptor exists at or above `start` (`descriptor.descriptor_path`, so
+    `CAMPAIGN_DESCRIPTOR` applies), or None for a site root that belongs to no campaign."""
+    from . import descriptor
+    start = pathlib.Path(start).resolve()
+    for candidate in [start, *start.parents]:
+        if descriptor.descriptor_path(candidate).exists():
+            return candidate
+    return None
+
+
+def campaign_view(root, site_root):
+    """The result index's own view of a campaign site, or None when `site_root` is not one.
+
+    {profiles: [name, ...], current: [cell, ...], history: [row, ...], dual: bool}: the cells
+    and history of `gen_index.split_pages`, with the profiles in the descriptor's order
+    followed by any other profile a page sits on.
+    """
+    from . import descriptor, gen_index
+    if root is None:
+        return None
+    d = descriptor.set_root(root)  # an invalid descriptor is an error, not a reason to fall back
+    if d.result_dir.resolve() != site_root.resolve():
+        return None
+    found = gen_index.collect()
+    current, history = gen_index.split_pages(found["pages"], found["declared"], found["resolved"])
+    seen = list(found["profiles"])
+    for cell in current:
+        if cell['profile'] not in seen:
+            seen.append(cell['profile'])
+    return dict(profiles=seen, current=current, history=history, dual=d.has_upstream)
+
+
+def render_page(page, site_root, root, blob, repo_ref, title):
+    """Write `<page>.html`: the Markdown page as HTML, with a back link and its source link."""
+    import markdown
+    out = page.with_suffix('.html')
+    body = markdown.markdown(page.read_text(errors='replace'), extensions=['tables', 'fenced_code'])
+    up = pathlib.Path(*(['..'] * (len(page.relative_to(site_root).parts) - 1)))
+    rel = page.relative_to(root)
+    source = (f'<a href="{html.escape(blob)}/blob/{html.escape(repo_ref)}/{html.escape(str(rel))}">source</a>'
+              if 'github.com' in blob else f'<a href="{html.escape(page.name)}">source</a>')
+    out.write_text(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}: {html.escape(page.stem)}</title>
+<style>{CSS}</style></head><body>
+<nav><a href="{html.escape(str(up / 'index.html'))}">current results</a> &middot;
+<a href="{html.escape(str(up / 'history.html'))}">history</a> &middot; {source} (<code>{html.escape(str(rel))}</code>)</nav>
+{body}
+</body></html>
+""")
+    return out
+
+
+def _page_item(page, site_root, root, blob, repo_ref, extra=''):
+    rel = page.relative_to(site_root)
+    source = (f' <span class="muted">(<a href="{html.escape(blob)}/blob/{html.escape(repo_ref)}/'
+              f'{html.escape(str(page.relative_to(root)))}">source</a>)</span>' if 'github.com' in blob else '')
+    return (f'<li><a href="{html.escape(str(rel.with_suffix(".html")))}">{html.escape(str(rel))}</a>'
+            f'{extra}{source}</li>')
 
 
 def _charts(site_root):
@@ -295,47 +435,90 @@ def chart_grid(site_root, charts, blob, repo_ref, root=None):
 
 def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extra_html='',
                root=None):
-    """Write `<site_root>/index.html` from the artifacts under it."""
+    """Write `<site_root>/index.html`, `history.html` and an HTML copy of every result page."""
     site_root = pathlib.Path(site_root).resolve()
-    root = pathlib.Path(root).resolve() if root else site_root
+    given = pathlib.Path(root).resolve() if root else site_root
+    root = given
     while not (root / '.git').exists() and root != root.parent:
         root = root.parent
+    if not (root / '.git').exists():
+        root = given  # not in a repository: links stay relative to the campaign
     blob = _blob_base(root)
-    revisions = _pin_revisions(root, pins)
-    pages, missing = current_pages(site_root, revisions)
-    charts = _charts(site_root)
-
-    items = []
-    for page in pages:
-        rel = page.relative_to(site_root)
-        if 'github.com' in blob:
-            href = f'{blob}/blob/{repo_ref}/{page.relative_to(root)}'
-            note = ' <span class="muted">(Markdown, rendered by GitHub)</span>'
-        else:
-            href, note = str(rel), ''
-        items.append(f'<li><a href="{html.escape(href)}">{html.escape(str(rel))}</a>{note}</li>')
-    missing_html = f'<p class="muted">{html.escape(_missing_line(missing))}</p>' if missing else ''
-
     heading = title or 'Benchmark results'
-    intro = intro or ('The latest generation of results: for each suite and vendor arm, the page '
-                      'recorded at the pinned revision.')
-    history = write_history(root, site_root, title or 'Benchmark results')
-    history_link = '<p><a href="history.html">History of published records</a></p>' if history else ''
-    pin_lines = ''.join(f'<li>pinned revision: <code>{html.escape(rev)}</code></li>' for rev in revisions)
+    charts = _charts(site_root)
+    view = campaign_view(campaign_root(given), site_root)
+
+    sections, older, shown = [], [], 0
+    if view is not None:
+        campaign = campaign_root(given)
+        by_profile = {}
+        for cell in view['current']:
+            by_profile.setdefault(cell['profile'], []).append(cell)
+        for profile in view['profiles']:
+            cells = by_profile.get(profile, [])
+            rows = [c['page'] for c in cells if c['page']]
+            items = []
+            for c in cells:
+                if c['page']:
+                    page = campaign / c['page']['page']
+                    render_page(page, site_root, root, blob, repo_ref, heading)
+                    arm = f" <span class=\"muted\">{html.escape(c['vendor'])}</span>" if c['vendor'] else ''
+                    items.append(_page_item(page, site_root, root, blob, repo_ref, arm))
+            missing = [(c['suite'], c['vendor'] or '') for c in cells if not c['page']]
+            shown += len(items)
+            sections.append(
+                f'<h2 id="{html.escape(profile)}">{html.escape(profile)}</h2>\n'
+                f'<p class="summary">{profile_summary(rows, view["dual"])}</p>\n'
+                + (f'<ul>{"".join(items)}</ul>\n' if items else '')
+                + (f'<p class="muted">{html.escape(_missing_line(missing))}</p>\n' if missing else ''))
+        for r in view['history']:
+            page = campaign / r['page']
+            if page.exists():
+                render_page(page, site_root, root, blob, repo_ref, heading)
+                older.append(page)
+    else:
+        revisions = _pin_revisions(root, pins)
+        pages, missing = current_pages(site_root, revisions)
+        by_profile = {}
+        for page in pages:
+            by_profile.setdefault(page.relative_to(site_root).parts[0], [[], []])[0].append(page)
+        for profile, suite, arm in missing:
+            by_profile.setdefault(profile, [[], []])[1].append((suite, arm))
+        pin_line = ', '.join(f'<code>{html.escape(r[:12])}</code>' for r in revisions) or 'none'
+        for profile, (chosen, absent) in sorted(by_profile.items()):
+            for page in chosen:
+                render_page(page, site_root, root, blob, repo_ref, heading)
+            shown += len(chosen)
+            sections.append(
+                f'<h2 id="{html.escape(profile)}">{html.escape(profile)}</h2>\n'
+                f'<p class="summary">pin: {pin_line}</p>\n'
+                + (f'<ul>{"".join(_page_item(p, site_root, root, blob, repo_ref) for p in chosen)}</ul>\n'
+                   if chosen else '')
+                + (f'<p class="muted">{html.escape(_missing_line(absent))}</p>\n' if absent else ''))
+        current = set(pages)
+        older = sorted((p for p in _pages(site_root) if p not in current),
+                       key=lambda p: (_recorded(p), p.stat().st_mtime), reverse=True)
+        for page in older:
+            render_page(page, site_root, root, blob, repo_ref, heading)
+
+    intro = intro or ('The results at the pinned revisions, one section per hardware profile. Each page '
+                      'is shown here as HTML; its Markdown source is linked beside it.')
+    history = write_history(root, site_root, heading, older)
+    history_link = (f'<p><a href="history.html">History of published records</a> '
+                    f'<span class="muted">({len(older)} older page(s) in this tree, and the publication '
+                    f'log)</span></p>' if history else '')
     (site_root / 'index.html').write_text(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>{html.escape(heading)}</title>
 <style>{CSS}</style></head><body>
 <h1>{html.escape(heading)}</h1>
 <p>{intro}</p>
 {history_link}
-<ul>{pin_lines}</ul>
+{''.join(sections) or '<p class="muted">no pages yet</p>'}
 {extra_html}
 {chart_grid(site_root, charts, blob, repo_ref, root)}
-<h2>Pages</h2><ul>{''.join(items) or '<li class="muted">no pages yet</li>'}</ul>
-{missing_html}
 </body></html>
 """)
-    print(f'wrote {site_root / "index.html"} ({len(pages)} pages, {len(charts)} charts)')
+    print(f'wrote {site_root / "index.html"} ({shown} current pages, {len(older)} older, {len(charts)} charts)')
     return site_root / 'index.html'
 
 
