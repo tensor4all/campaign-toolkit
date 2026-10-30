@@ -102,11 +102,19 @@
             }
           },
           "cpu_sets": {
-            "description": "One line for each thread count, in the order of `threads`.",
-            "type": "array",
+            "description": "The measured CPUs for each thread count, in the order of `threads`. Either one list that every profile uses, or a mapping from a profile name to its list. A profile the mapping does not name is pinned by its own `thread_rows`.",
+            "type": ["array", "object"],
             "items": {
               "type": "string",
               "minLength": 1
+            },
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "populations": {

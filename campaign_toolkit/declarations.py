@@ -13,7 +13,7 @@ import pathlib
 import sys
 
 from . import descriptor, jsonschema_lite
-from .campaign import load
+from .campaign import check_cpu_sets, load
 
 
 def cpu_set(text) -> set:
@@ -93,9 +93,25 @@ def check(root, out=None) -> list:
                     problems.append(f"{path}: engine {engine!r} is not declared by the descriptor")
                 elif engine not in suite["engines_doc"]:
                     problems.append(f"{path}: engine {engine!r} has no engines_doc entry")
-        for profile in suite["required_profiles"] + suite.get("optional_profiles", []):
+        named = list(dict.fromkeys(suite["required_profiles"] + suite.get("optional_profiles", [])))
+        for profile in named:
             if profile not in profiles:
                 problems.append(f"{path}: unknown profile {profile!r}")
+        sets = suite["runs"][0]["cpu_sets"]
+        if isinstance(sets, dict):
+            for profile in sets:
+                if profile not in named:
+                    problems.append(f"{path}: cpu_sets names {profile!r}, which the suite does not list")
+        elif len(named) > 1:
+            # One list for several machines puts one machine's CPU numbers on the others: the
+            # list was written for one of them, so the suite has to say which.
+            problems.append(f"{path}: cpu_sets is one list for the profiles {named}; name the profile "
+                            f"it was written for (`cpu_sets: {{{named[0]}: {sets}}}`), and the others "
+                            f"take their own thread_rows")
+        try:
+            check_cpu_sets(suite)
+        except SystemExit as exc:
+            problems.append(f"{path}: {str(exc).removeprefix('ERROR: ')}")
     for profile in d.profiles():
         problems.extend(check_profile(profile))
     if not problems:

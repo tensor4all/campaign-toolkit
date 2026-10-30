@@ -24,7 +24,7 @@ TOOLKIT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TOOLKIT))
 
 from campaign_toolkit import (  # noqa: E402
-    campaign, compare_runs, descriptor, gen_index, jsonschema_lite, publish_report,
+    campaign, compare_runs, declarations, descriptor, gen_index, jsonschema_lite, publish_report,
     record_run, report_run, union_index, validate_run,
 )
 
@@ -1065,6 +1065,107 @@ class CampaignSchemaTest(unittest.TestCase):
         without['measured'].pop('features')
         jsonschema_lite.validate(without, schema)                       # accepted: vendor from the environment
         self.assertNotIn('features', schema['properties']['measured']['required'])
+
+
+class CpuSetsTest(unittest.TestCase):
+    """Which CPUs a thread row runs on: the suite's list, the suite's entry for a profile, or the
+    profile's own `thread_rows` (tensor4all-meta#76 3.3: the zen2-cpu smoke ran on zen5 CPUs)."""
+
+    # The sets the four recorded campaigns declare for zen5-cpu, and the threads they pair them with.
+    RECORDED = {"faer-kernels": ([1, 4, 8], ["4", "4-7", "4-11"]),
+                "faer-kernels-large": ([4, 8], ["4-7", "4-11"]),
+                "tlinalg": ([8], ["4-11"]),
+                "tcontract/cpueinsum": ([1, 4], ["4", "4-7"])}
+
+    @staticmethod
+    def suite(threads, cpu_sets, profiles=("zen5-cpu",)):
+        return {"required_profiles": [], "optional_profiles": list(profiles),
+                "runs": [{"threads": threads, "cpu_sets": cpu_sets}]}
+
+    @staticmethod
+    def before(suite, threads):
+        """The resolution as it was before profiles could pin rows: the suite's list, by position."""
+        spec = suite["runs"][0]
+        return {str(t): spec["cpu_sets"][spec["threads"].index(t)] for t in threads}
+
+    def test_a_recorded_zen5_list_keeps_its_cpus_on_the_shared_and_an_inline_profile(self):
+        shared = descriptor.shared_profile("zen5-cpu")            # declares rows 0 / 0-3 / 4-11
+        inline = {k: v for k, v in shared.items() if k not in ("thread_rows", "smt")}
+        for name, (threads, sets) in self.RECORDED.items():
+            suite = self.suite(threads, sets)
+            for profile in (shared, inline):
+                for chosen in [threads] + [[t] for t in threads]:
+                    got, source = campaign.cpu_sets_for(suite, profile, chosen)
+                    self.assertEqual(got, self.before(suite, chosen), name)
+                    self.assertEqual(source, "the suite's cpu_sets")
+
+    def test_naming_the_profile_keeps_the_same_cpus(self):
+        for name, (threads, sets) in self.RECORDED.items():
+            mapped = self.suite(threads, {"zen5-cpu": sets}, ("zen5-cpu", "zen2-cpu"))
+            got, _ = campaign.cpu_sets_for(mapped, descriptor.shared_profile("zen5-cpu"), threads)
+            self.assertEqual(got, self.before(self.suite(threads, sets), threads), name)
+
+    def test_a_profile_the_mapping_does_not_name_takes_its_own_rows(self):
+        zen2 = descriptor.shared_profile("zen2-cpu")
+        suite = self.suite([1, 4, 8, 64], {"zen5-cpu": ["4", "4-7", "4-11", "0-63"]},
+                           ("zen5-cpu", "zen2-cpu"))
+        got, source = campaign.cpu_sets_for(suite, zen2, [1, 4, 8, 64])
+        self.assertEqual(got, {"1": "0", "4": "0-3", "8": "0-7", "64": "0-63"})
+        self.assertEqual(source, "the thread_rows of zen2-cpu")
+        got, _ = campaign.cpu_sets_for(suite, zen2, [8])
+        self.assertEqual(got, {"8": "0-7"})                            # one CCD, not zen5's 4-11
+
+    def test_a_row_neither_side_declares_is_refused(self):
+        zen2 = descriptor.shared_profile("zen2-cpu")
+        suite = self.suite([1, 2], {"zen5-cpu": ["4", "4-5"]}, ("zen5-cpu", "zen2-cpu"))
+        with self.assertRaises(SystemExit) as caught:
+            campaign.cpu_sets_for(suite, zen2, [2])
+        self.assertIn("not for [2]", str(caught.exception))
+        rowless = {"name": "bare-cpu"}
+        with self.assertRaises(SystemExit):
+            campaign.cpu_sets_for(self.suite([1], {"zen5-cpu": ["4"]}), rowless, [1])
+
+    def test_a_mapping_is_checked_list_by_list(self):
+        campaign.check_cpu_sets(self.suite([1, 4], {"zen5-cpu": ["4", "4-7"]}))
+        with self.assertRaises(SystemExit):
+            campaign.check_cpu_sets(self.suite([1, 4], {"zen5-cpu": ["4", "4-5"]}))
+        with self.assertRaises(SystemExit):
+            campaign.check_cpu_sets(self.suite([1, 4], {"zen5-cpu": ["4"]}))
+
+    def test_the_suite_schema_takes_a_list_or_a_mapping(self):
+        import json
+        schema = json.loads((TOOLKIT / "campaign_toolkit/schemas/benchmark-suite.schema.json").read_text())
+        cpu_sets = schema["properties"]["runs"]["items"]["properties"]["cpu_sets"]
+        jsonschema_lite.validate(["4", "4-7"], cpu_sets)
+        jsonschema_lite.validate({"zen5-cpu": ["4", "4-7"]}, cpu_sets)
+        for bad in ({}, {"zen5-cpu": "4"}, [""], "4"):
+            with self.assertRaises(jsonschema_lite.ValidationError):
+                jsonschema_lite.validate(bad, cpu_sets)
+
+    def declare(self, cpu_sets, profiles):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        root = tmp / "campaign"
+        shutil.copytree(FIXTURE, root)
+        listing = root / "benchmarks/profiles.yaml"
+        listing.write_text(listing.read_text() + "  - zen2-cpu\n")
+        for path in (root / "benchmarks/suites").glob("*.yaml"):
+            suite = yaml.safe_load(path.read_text())
+            suite["required_profiles"], suite["optional_profiles"] = [], list(profiles)
+            suite["runs"][0]["cpu_sets"] = cpu_sets
+            path.write_text(yaml.safe_dump(suite, sort_keys=False))
+        out = io.StringIO()
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CAMPAIGN_DESCRIPTOR", None)
+            return declarations.check(root, out=out)
+
+    def test_declarations_ask_a_shared_list_to_name_its_profile(self):
+        self.assertEqual(self.declare(["0"], ["fixture-cpu"]), [])
+        problems = self.declare(["0"], ["fixture-cpu", "zen2-cpu"])
+        self.assertTrue(problems and all("name the profile" in p for p in problems), problems)
+        self.assertEqual(self.declare({"fixture-cpu": ["0"]}, ["fixture-cpu", "zen2-cpu"]), [])
+        problems = self.declare({"zen5-cpu": ["0"]}, ["fixture-cpu", "zen2-cpu"])
+        self.assertTrue(problems and all("does not list" in p for p in problems), problems)
 
 
 class VendorIdentityTest(unittest.TestCase):
