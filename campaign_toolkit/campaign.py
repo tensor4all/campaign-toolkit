@@ -254,6 +254,20 @@ def page_relative(profile: str, suite_id: str, manifest: dict) -> str:
     return f"{desc().data['result_dir']}/{profile}/{suite_id}/{name}.md"
 
 
+# Generated files under a result directory that are not record pages, and the chart directories
+# (committed throughput charts, deploy-time figures) whose Markdown tables belong to their charts.
+GENERATED_PAGES = ("INDEX.md", "HISTORY.md", "README.md")
+CHART_DIRS = ("throughput", "figures")
+
+
+def record_pages(site_root):
+    """The record pages under a result directory: every `.md` except the generated index files and
+    the chart tables. The site, the trend and the generated-file check all list pages with this."""
+    return sorted(p for p in pathlib.Path(site_root).rglob("*.md")
+                  if p.name not in GENERATED_PAGES and not p.name.startswith("index")
+                  and not set(CHART_DIRS) & set(p.parts))
+
+
 def page_source(page):
     """The run directory a page was generated from, read out of the page itself, or None.
 

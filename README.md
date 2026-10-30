@@ -50,7 +50,8 @@ Console entry points (`campaign-record-run`, `campaign-validate-run`,
 `campaign-gen-index`, `campaign-publish-report`, `campaign-compare-runs`,
 `campaign-report-run`, `campaign-descriptor`,
 `campaign-validate-declarations`, `campaign-union-index`, `campaign-sync-pins`,
-`campaign-stack-status`) are declared in `pyproject.toml`.
+`campaign-stack-status`, `campaign-trend`, `campaign-check-generated`) are declared in
+`pyproject.toml`.
 
 ## Recording a run
 
@@ -149,6 +150,52 @@ beside its `.md` (linked from the landing page and the history; the GitHub blob 
 index's own rule (`gen_index.split_pages`), so the site and the index agree. The conversion
 uses the `markdown` package.
 
+## Charts, trends and the generated-file check
+
+Charts are generated when the site is built, from the runs behind the current pages, and are
+not committed. The descriptor declares them (all optional):
+
+```yaml
+figures:
+  throughput:                      # size against nominal GFLOP/s (campaign_toolkit.throughput)
+    config: benchmarks/throughput.yaml
+    runs:                          # the run positions the config's series name
+      - {suite: faer-kernels, vendor: mkl}
+      - {suite: faer-kernels, vendor: openblas}
+  cases: [tcbench]                 # one dot plot per current page: cases x engines, log time
+trend:                             # representative cases followed across pins
+  - suite: faer-kernels-large
+    case: gemm-large:gemm/1024x1024x1024/b1 f64 c   # the case key: regime, case name, dtype, axes
+    vendor: mkl                    # optional: the points of one vendor arm only
+    engines: [faer-fork, lapack-mkl]
+    threads: [4, 8]
+```
+
+`site.write_site` empties `<result>/figures/`, writes them there per hardware profile (a run of
+one profile is never drawn with another's), and shows one full-width chart per row.
+Every chart is drawn by `campaign_toolkit.charts`: log axes always carry minor ticks (2..9 times
+each decade), panels sit side by side (three to a row), the legend sits above the panels, and
+every tick and legend label is at least 12 px when the chart is shown 72rem wide (a test checks
+the emitted SVG). Each chart has a Markdown table of the same numbers beside it.
+
+`campaign-trend --out <dir>` draws the declared trends without the site. Its input is
+**trend points** (`schemas/trend-points.schema.json`): one point is the median of one case,
+engine and thread budget in one run, with its pin, profile, timing policy, power state and
+vendor arm (every recorded power control is part of the power string). By default they come from the runs behind the published pages; `--runs` names run
+directories instead, and `--points file.json` draws points another repository wrote (`--write-points`
+writes them). A line joins only points whose profile, timing policy, power state and vendor
+arm (and campaign) are equal, so a v1 and a v2 point, or a boost-off and a boost-on point, are
+never on one line; the conditions all lines share are printed under the title and the legend
+names the rest. Points of different units, or a median of 0, are refused. The x axis is the pin (`--axis week`: the ISO
+week); a pin measured twice keeps its newest point.
+
+`campaign-check-generated` checks that nothing generated was edited by hand: every published
+page is its source run's `report.md` under the publication header, byte for byte; the runs
+changed since `--base <ref>` (or `--run DIR`, or `--all`) regenerate their `report.md` from
+their CSVs byte for byte (a deleted `run.yaml` beside remaining files fails too); and `gen_index --check` passes (`--no-index` skips it). Only changed
+runs are regenerated, because a report written by an older toolkit need not match today's
+renderer.
+
 ## The union index
 
 `campaign-union-index` reads several campaigns and writes one index across them,
@@ -201,6 +248,7 @@ publishing a numerical page.
 | path | what |
 |---|---|
 | `campaign_toolkit/` | the package: the entry points and `descriptor.py`, `campaign.py`, `jsonschema_lite.py`, `declarations.py` |
+| `campaign_toolkit/charts.py`, `figures.py`, `trend.py` | the chart parts, the site's chart hook, and the trend points and chart |
 | `campaign_toolkit/schemas/` | the packaged copies of the schemas, used at runtime and by an installed wheel |
 | `campaign_toolkit/profiles/` | the shared hardware profile library a campaign opts into by name |
 | `schemas/` | the same schemas for review; a test fails if the two copies differ |

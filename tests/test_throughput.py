@@ -3,24 +3,7 @@ import unittest
 from campaign_toolkit import throughput
 
 
-class LayoutTest(unittest.TestCase):
-    def test_text_on_different_rows_is_not_an_overlap(self):
-        layout = throughput.Layout()
-        layout.text(10, 20, 20, 'aaaa', panel=(0, 0))
-        layout.text(10, 120, 20, 'bbbb', panel=(0, 0))     # same column, far below: fine
-
-    def test_overlapping_text_is_refused(self):
-        layout = throughput.Layout()
-        layout.text(10, 20, 20, 'aaaa', panel=(0, 0))
-        with self.assertRaisesRegex(ValueError, 'overlapping text'):
-            layout.text(12, 20, 20, 'bbbb', panel=(0, 0))
-        layout.text(12, 200, 20, 'cccc', panel=(0, 0))       # far away: accepted
-
-    def test_text_leaving_its_panel_is_refused(self):
-        layout = throughput.Layout()
-        with self.assertRaisesRegex(ValueError, 'leaves its panel'):
-            layout.text(throughput.PANEL_W + 40, 30, 20, 'x', panel=(0, 0))
-
+class PointsTest(unittest.TestCase):
     def test_points_scale_with_the_operation_count_and_report_spread(self):
         cells = {(1, 'gemm', 32, '', 'faer-fork'): {'run0': 1.0, 'run1': 1.1}}
         out = throughput.points(cells, 1, 'gemm', 'faer-fork', coefficient=2.0)

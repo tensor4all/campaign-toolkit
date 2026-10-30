@@ -30,6 +30,9 @@ import re
 import subprocess
 import sys
 
+from . import charts, figures
+from .campaign import CHART_DIRS, record_pages
+
 CSS = """
 body{font:14px/1.6 -apple-system,"Segoe UI",Roboto,sans-serif;max-width:72rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
 h1{font-size:1.45rem}h2{font-size:1.1rem;margin-top:2rem}
@@ -38,13 +41,9 @@ code{background:#f2f2f2;padding:0 .2rem}
 table{border-collapse:collapse;width:100%;margin:.5rem 0 1.2rem;font-variant-numeric:tabular-nums}
 th,td{border-bottom:1px solid #e3e3e3;padding:.25rem .4rem;text-align:left}
 th{background:#f5f5f5}
-.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.2rem}
-.charts figure{margin:0}
-.charts img{width:100%;height:auto;border:1px solid #eee;background:#fff}
-.charts figcaption{font-size:.85rem;color:#444;margin-top:.25rem}
 .summary{background:#f7f7f7;padding:.4rem .6rem;border-left:3px solid #ccc}
 nav{font-size:.9em;margin-bottom:1rem}
-"""
+""" + charts.CSS
 
 
 def _git(root, *args):
@@ -80,11 +79,8 @@ GENERATED = ('INDEX.md', 'HISTORY.md', 'README.md')
 
 
 def _pages(site_root):
-    pages = [p for p in site_root.rglob('*.md')
-             if p.name not in GENERATED and not p.name.startswith('index')
-             # chart data tables belong to their chart, not to the page list
-             and 'throughput' not in p.parts]
-    return sorted(pages)
+    # chart data tables belong to their chart, not to the page list
+    return record_pages(site_root)
 
 
 _REV_PREFIX = re.compile(r'^(?:[0-9a-f]{12}-)+')
@@ -136,7 +132,7 @@ def _is_record(rel):
     """Whether a path (relative to the site root) is a record page: the same filter as `_pages`,
     plus the comparison HTML pages."""
     path = pathlib.PurePosixPath(rel)
-    if 'throughput' in path.parts or path.name in GENERATED:
+    if set(CHART_DIRS) & set(path.parts) or path.name in GENERATED:
         return False
     if path.name.startswith(('index', 'history')):
         return False
@@ -410,19 +406,24 @@ def _page_item(page, site_root, root, blob, repo_ref, extra=''):
 
 
 def _charts(site_root):
-    return sorted(site_root.rglob('throughput-*-v2.svg'))
+    """Throughput charts committed under the site root (never the ones generated into `figures/`)."""
+    return sorted(p for p in site_root.rglob('throughput-*-v2.svg') if figures.OUT_DIR not in p.parts)
 
 
 def chart_grid(site_root, charts, blob, repo_ref, root=None):
+    """The chart block: the charts generated at deploy time (`figures.site_figures`) when the
+    campaign declares them, otherwise the throughput charts committed under the site root."""
     root = pathlib.Path(root) if root else site_root
     if not charts:
         return ''
-    figures = []
+    if isinstance(charts[0], dict):
+        return figures.grid_html(site_root, charts)
+    items = []
     for svg in charts:
         family = svg.stem.removeprefix('throughput-').removesuffix('-v2')
         rel = svg.relative_to(site_root)
         table = svg.with_suffix('.md').relative_to(root)  # blob links are repository-root relative
-        figures.append(
+        items.append(
             f'<figure><a href="{html.escape(str(rel))}"><img src="{html.escape(str(rel))}" '
             f'alt="{html.escape(family)} throughput chart" loading="lazy"></a>'
             f'<figcaption><strong>{html.escape(family)}</strong> '
@@ -430,7 +431,7 @@ def chart_grid(site_root, charts, blob, repo_ref, root=None):
     return ('<h2>Throughput against size</h2>\n'
             '<p class="muted">One algorithm operation count per family; a line is comparable across '
             'sizes within its own chart and not across charts. Click a chart for the full size.</p>\n'
-            f'<div class="charts">{"".join(figures)}</div>')
+            f'<div class="charts">{"".join(items)}</div>')
 
 
 def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extra_html='',
@@ -445,10 +446,9 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
         root = given  # not in a repository: links stay relative to the campaign
     blob = _blob_base(root)
     heading = title or 'Benchmark results'
-    charts = _charts(site_root)
     view = campaign_view(campaign_root(given), site_root)
 
-    sections, older, shown = [], [], 0
+    sections, older, shown, current = [], [], 0, []
     if view is not None:
         campaign = campaign_root(given)
         by_profile = {}
@@ -462,6 +462,7 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
                 if c['page']:
                     page = campaign / c['page']['page']
                     render_page(page, site_root, root, blob, repo_ref, heading)
+                    current.append(page)
                     arm = f" <span class=\"muted\">{html.escape(c['vendor'])}</span>" if c['vendor'] else ''
                     items.append(_page_item(page, site_root, root, blob, repo_ref, arm))
             missing = [(c['suite'], c['vendor'] or '') for c in cells if not c['page']]
@@ -495,12 +496,16 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
                 + (f'<ul>{"".join(_page_item(p, site_root, root, blob, repo_ref) for p in chosen)}</ul>\n'
                    if chosen else '')
                 + (f'<p class="muted">{html.escape(_missing_line(absent))}</p>\n' if absent else ''))
-        current = set(pages)
+        current = list(pages)
         older = sorted((p for p in _pages(site_root) if p not in current),
                        key=lambda p: (_recorded(p), p.stat().st_mtime), reverse=True)
         for page in older:
             render_page(page, site_root, root, blob, repo_ref, heading)
 
+    # The charts are generated here, from the runs behind the current pages, when the campaign
+    # declares them; otherwise the throughput charts committed under the site root are shown.
+    generated = figures.site_figures(campaign_root(given), site_root, current) if campaign_root(given) else None
+    charts = _charts(site_root) if generated is None else generated
     intro = intro or ('The results at the pinned revisions, one section per hardware profile. Each page '
                       'is shown here as HTML; its Markdown source is linked beside it.')
     history = write_history(root, site_root, heading, older)

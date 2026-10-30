@@ -4,72 +4,20 @@ The package knows nothing about any campaign's workloads: the operation count fo
 series (which engine comes from which recorded run, its colour and marker) and the family list all
 arrive as a small config document, so the same code serves any suite that records square problems.
 
-One SVG per family (three panels, one per thread budget) plus a markdown file of the same name
-holding the plotted numbers, so a reader - or a model - can read the trend without a rasteriser.
-A layout checker fails the render when a label would overlap another or leave its panel: a chart
-that cannot be checked is a chart that ships broken.
+One SVG per family (one panel per thread budget, side by side) plus a markdown file of the same
+name holding the plotted numbers, so a reader - or a model - can read the trend without a
+rasteriser. The drawing is `charts`: log axes with minor ticks, the legend above the panels, and
+the layout checker that fails the render when a label would overlap another or leave its panel.
 """
 import csv
 import json
-import math
 import statistics
 from collections import defaultdict
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-PANEL_W, PANEL_H = 620, 480
-PAD_L, PAD_R, PAD_T, PAD_B = 168, 24, 56, 44
-FONT = {'title': 26, 'panel': 24, 'tick': 17, 'axis': 19, 'legend': 16}
-
-
-@dataclass
-class Layout:
-    """Text bounding boxes, so a layout bug is an assertion rather than a surprise on the page."""
-    boxes: list = field(default_factory=list)
-    dropped: list = field(default_factory=list)
-
-    def tick(self, x, y, size, content, anchor='start', panel=None):
-        """A tick label, dropped when it would collide: a crowded axis is unreadable, and the
-        gridline stays. Returns the label or an empty string."""
-        try:
-            return self.text(x, y, size, content, anchor, panel=panel)
-        except ValueError:
-            self.dropped.append(content)
-            return ''
-
-    def text(self, x, y, size, content, anchor='start', rotate=False, panel=None):
-        width = 0.62 * size * len(content)
-        if rotate:                      # the text runs along the vertical axis
-            x0, x1 = x - size * 0.25, x + size * 0.9
-            width = size
-        elif anchor == 'middle':
-            x0, x1 = x - width / 2, x + width / 2
-        elif anchor == 'end':
-            x0, x1 = x - width, x
-        else:
-            x0, x1 = x, x + width
-        if rotate:
-            half = 0.62 * size * len(content) / 2
-            box = (x0, y - half, x1, y + half, panel, content)
-        else:
-            box = (*((x0, y - size * 0.9, x1, y + size * 0.25)), panel, content)
-        for other in self.boxes:
-            if other[4] is not panel:
-                continue
-            if box[0] < other[2] and other[0] < box[2] and box[1] < other[3] and other[1] < box[3]:
-                raise ValueError(f'overlapping text: {content!r} {[round(v, 1) for v in box[:4]]} '
-                                 f'with {other[5]!r} {[round(v, 1) for v in other[:4]]}')
-        if panel:
-            px, py = panel
-            if (box[0] < px - 1 or box[2] > px + PANEL_W + 1
-                    or box[1] < py - 1 or box[3] > py + PANEL_H + 1):
-                raise ValueError(f'text {content!r} leaves its panel')
-        self.boxes.append(box)
-        transform = f' transform="rotate(-90 {x:.1f} {y:.1f})"' if rotate else ''
-        return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" text-anchor="{anchor}"{transform}>'
-                f'{content}</text>')
+from . import charts
 
 
 def load_run(run_dir, dtype='f64', order='c'):
@@ -105,105 +53,26 @@ def points(cells, threads, family, engine, coefficient, complex_dtype=False):
     return out
 
 
-def marker(kind, x, y, colour, size):
-    if kind == 'triangle':
-        return (f'<polygon points="{x:.1f},{y - size:.1f} {x - size:.1f},{y + size * 0.8:.1f} '
-                f'{x + size:.1f},{y + size * 0.8:.1f}" fill="{colour}"/>')
-    if kind == 'diamond':
-        return (f'<polygon points="{x:.1f},{y - size:.1f} {x - size:.1f},{y:.1f} {x:.1f},{y + size:.1f} '
-                f'{x + size:.1f},{y:.1f}" fill="{colour}"/>')
-    if kind == 'square':
-        return (f'<rect x="{x - size:.1f}" y="{y - size:.1f}" width="{2 * size:.1f}" height="{2 * size:.1f}" '
-                f'fill="{colour}"/>')
-    return f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{size:.1f}" fill="{colour}"/>'
-
-
-def render_panel(layout, family, threads, blocks, coefficient, origin, series):
-    ox, oy = origin
-    x0, y0 = ox + 150, oy + 32
-    width, height = PANEL_W - 174, PANEL_H - 100
-    data = [p for pts in blocks.values() for p in pts]
-    panel_key = (ox, oy)
-    if not data:
-        return f'<g><text x="{x0}" y="{y0 + 20}" font-size="{FONT["panel"]}">no data</text></g>'
-    xs = [p[0] for p in data]
-    ys = [max(p[1], 1e-6) for p in data]
-    lx0, lx1 = math.log10(min(xs)), math.log10(max(xs)) + 0.02
-    ly0, ly1 = math.log10(min(ys)) - 0.25, math.log10(max(ys)) + 0.25
-    scale_x = lambda v: x0 + (math.log10(v) - lx0) / (lx1 - lx0) * width        # noqa: E731
-    scale_y = lambda v: y0 + height - (math.log10(max(v, 1e-6)) - ly0) / (ly1 - ly0) * height  # noqa: E731
-    out = [f'<rect x="{ox + 6}" y="{oy + 6}" width="{PANEL_W - 12}" height="{PANEL_H - 12}" fill="#ffffff" '
-           f'stroke="#d0d0d0"/>', layout.text(ox + 16, oy + 32, FONT['panel'], f'{threads}T')]
-    sizes = sorted(set(xs))
-    # Label every other size when the axis would crowd, and always the largest one - dropping the
-    # label of the last point instead would hide where the curve ends.
-    labelled = [index for index in range(len(sizes)) if index % (2 if len(sizes) > 6 else 1) == 0]
-    if labelled and len(sizes) - 1 not in labelled:
-        labelled.append(len(sizes) - 1)
-    if len(labelled) > 1 and labelled[-1] - labelled[-2] == 1:
-        labelled.pop(-2)
-    for index, size in enumerate(sizes):
-        out.append(f'<line x1="{scale_x(size):.1f}" y1="{y0}" x2="{scale_x(size):.1f}" y2="{y0 + height}" '
-                   f'stroke="#f2f2f2"/>')
-        if index in labelled:
-            out.append(layout.tick(scale_x(size), y0 + height + 26, FONT['tick'], f'{size}', 'middle',
-                                   panel=panel_key))
-    for power in range(math.ceil(ly0), math.floor(ly1) + 1):
-        value = 10.0 ** power
-        out.append(f'<line x1="{x0}" y1="{scale_y(value):.1f}" x2="{x0 + width}" y2="{scale_y(value):.1f}" '
-                   f'stroke="#f2f2f2"/>')
-        out.append(layout.tick(x0 - 10, scale_y(value) + 6, FONT['tick'], f'{value:g}', 'end',
-                               panel=panel_key))
-    out.append(f'<rect x="{x0}" y="{y0}" width="{width}" height="{height}" fill="none" stroke="#c8c8c8"/>')
-    out.append(layout.text(ox + 150, oy + PANEL_H - 14, FONT['axis'], 'n (matrix size)', 'start', panel=panel_key))
-    out.append(layout.text(ox + 30, oy + PANEL_H / 2, FONT['axis'], 'nominal GFLOP/s', 'middle', rotate=True,
-                           panel=panel_key))
-    for spec in series:
-        pts = blocks.get(spec['engine']) or []
-        if not pts:
-            continue
-        dash = f' stroke-dasharray="{spec["dash"]}"' if spec.get('dash') else ''
-        out.append('<polyline points="' + ' '.join(f'{scale_x(x):.1f},{scale_y(y):.1f}' for x, y, _ in pts)
-                   + f'" fill="none" stroke="{spec["colour"]}" stroke-width="{spec.get("width", 1.3)}"{dash}/>')
-        for x, y, err in pts:
-            out.append(f'<line x1="{scale_x(x):.1f}" y1="{scale_y(y - err):.1f}" x2="{scale_x(x):.1f}" '
-                       f'y2="{scale_y(y + err):.1f}" stroke="{spec["colour"]}" stroke-width="1.1"/>')
-            out.append(marker(spec.get('marker', 'circle'), scale_x(x), scale_y(y), spec['colour'],
-                              spec.get('size', 3)))
-    legend_row = 2.1 * FONT['legend']
-    legend_w = 13.6 * FONT['legend']
-    legend_x = x0 + width - legend_w + 8
-    legend_y = y0 + height - 10 - legend_row * len(series)
-    out.append(f'<rect x="{legend_x - 8}" y="{legend_y - 12}" width="{legend_w:.0f}" '
-               f'height="{legend_row * len(series) + 16:.0f}" fill="#ffffff" fill-opacity="0.86" '
-               f'stroke="#e0e0e0"/>')
-    for index, spec in enumerate(series):
-        row_y = legend_y + index * legend_row
-        dash = f' stroke-dasharray="{spec["dash"]}"' if spec.get('dash') else ''
-        out.append(f'<line x1="{legend_x}" y1="{row_y}" x2="{legend_x + 30}" y2="{row_y}" '
-                   f'stroke="{spec["colour"]}" stroke-width="{spec.get("width", 1.3)}"{dash}/>')
-        out.append(marker(spec.get('marker', 'circle'), legend_x + 15, row_y, spec['colour'],
-                          spec.get('size', 3) * 1.5))
-        out.append(layout.text(legend_x + 38, row_y + 5, FONT['legend'], spec['engine'], panel=panel_key))
-    return '<g>' + ''.join(out) + '</g>'
-
-
 def render_family(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):
-    """Returns (svg, dropped_tick_labels) so a caller can report a crowded axis."""
-    """One SVG: a panel per thread budget, stacked so a page does not have to scale the text down."""
-    layout = Layout()
-    width = PAD_L + PANEL_W + PAD_R
-    height = PAD_T + len(budgets) * PANEL_H + PAD_B
-    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-           layout.text(12, 30, FONT['title'], f'{family}: nominal GFLOP/s vs n')]
-    for index, threads in enumerate(budgets):
-        blocks = {spec['engine']: points(cells_by_engine[spec['engine']], threads, family, spec['engine'],
-                                         family_spec['coefficient'], complex_dtype=dtype == 'c64')
-                  for spec in series}
-        svg.append(render_panel(layout, family, threads, blocks, family_spec['coefficient'],
-                                (PAD_L, PAD_T + index * PANEL_H), series))
-    svg.append('</svg>')
-    return '\n'.join(svg) + '\n', layout.dropped
+    """One SVG: a panel per thread budget, side by side, log size against log throughput.
+
+    Returns (svg, dropped tick labels) so a caller can report a crowded axis.
+    """
+    blocks = {threads: {spec['engine']: points(cells_by_engine[spec['engine']], threads, family, spec['engine'],
+                                               family_spec['coefficient'], complex_dtype=dtype == 'c64')
+                        for spec in series}
+              for threads in budgets}
+    data = [p for per_engine in blocks.values() for pts in per_engine.values() for p in pts]
+    x_range = charts.log_range([p[0] for p in data]) if data else (10.0, 100.0)
+    y_range = charts.log_range([max(p[1], 1e-6) for p in data]) if data else (1.0, 10.0)
+    entries = [dict(label=spec['engine'], colour=spec['colour'], marker=spec.get('marker', 'circle'),
+                    dash=spec.get('dash'), width=spec.get('width', 1.6), size=spec.get('size', 3.5))
+               for spec in series]
+    panels = [charts.xy_panel(f'{threads}T', {'label': 'n (matrix size)', 'range': x_range},
+                              {'label': 'nominal GFLOP/s', 'range': y_range},
+                              [dict(entry, points=blocks[threads][entry['label']]) for entry in entries])
+              for threads in budgets]
+    return charts.figure(f'{family}: nominal GFLOP/s vs n', entries, panels)
 
 
 def data_markdown(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):

@@ -24,6 +24,8 @@ campaign-validate-declarations = "campaign_toolkit.declarations:main"
 campaign-union-index = "campaign_toolkit.union_index:main"
 campaign-sync-pins = "campaign_toolkit.sync_pins:main"
 campaign-stack-status = "campaign_toolkit.stack_status:main"
+campaign-trend = "campaign_toolkit.trend:main"
+campaign-check-generated = "campaign_toolkit.check_generated:main"
 
 [tool.setuptools]
 packages = ["campaign_toolkit"]
