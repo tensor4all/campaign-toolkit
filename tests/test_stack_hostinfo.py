@@ -250,14 +250,14 @@ class StackFilesTest(unittest.TestCase):
     def test_every_commit_is_a_full_sha_and_the_known_pins_are_present(self):
         libs = stackmod.load()["libraries"]
         commits = {k: v["commit"] for k, v in libs.items()}
-        self.assertTrue(commits["t4a-faer"].startswith("0e15729"))
-        self.assertTrue(commits["tlinalg"].startswith("88a2ffe"))
-        self.assertTrue(commits["tcontract"].startswith("71a11a80"))
+        self.assertTrue(commits["t4a-faer"].startswith("3a8edf0"))
+        self.assertTrue(commits["tlinalg"].startswith("53d1f0d"))
+        self.assertTrue(commits["tcontract"].startswith("9f793ede"))
         self.assertTrue(commits["tcontract-v1"].startswith("8abfa38"))
-        self.assertTrue(commits["cpueinsum"].startswith("938a25f"))
+        self.assertTrue(commits["cpueinsum"].startswith("124aa12"))
         self.assertTrue(commits["einsum-corpus"].startswith("753c0b3"))
-        self.assertTrue(commits["tenferro"].startswith("8fec1ca"))
-        self.assertTrue(commits["tensor4all-rs"].startswith("a515738"))
+        self.assertTrue(commits["tenferro"].startswith("a9f494c"))
+        self.assertTrue(commits["tensor4all-rs"].startswith("12f14b9"))
         self.assertEqual(libs["faer-upstream"]["tag"], "faer-v0.24.4")
 
     def test_a_dangling_library_reference_is_refused(self):
@@ -269,6 +269,45 @@ class StackFilesTest(unittest.TestCase):
         stack = stackmod.load()
         stack["libraries"]["tlinalg"]["commit"] = "88a2ffe"
         self.assertTrue(stackmod.validate(stack))
+
+
+class StackRemoteTest(unittest.TestCase):
+    """`--remote` against stubbed lookups: no network in the test suite."""
+
+    def setUp(self):
+        self.stack = stackmod.load()
+        self.libs = self.stack["libraries"]
+
+    def tags(self, overrides=None):
+        table = {(lib["repo"], lib["tag"]): lib["commit"] for lib in self.libs.values() if lib["tag"]}
+        table.update(overrides or {})
+        return lambda repo, tag: table.get((repo, tag))
+
+    def crates(self, overrides=None):
+        table = {(lib["crate"], lib["version"]): (True, lib["commit"])
+                 for lib in self.libs.values() if lib["crate"] and lib["version"]}
+        table.update(overrides or {})
+        return lambda crate, version: table.get((crate, version), (False, None))
+
+    def test_a_consistent_stack_has_no_remote_problems(self):
+        self.assertEqual(stackmod.remote_problems(self.stack, self.tags(), self.crates()), [])
+
+    def test_a_missing_or_moved_tag_is_named(self):
+        lib = self.libs["tlinalg"]
+        missing = stackmod.remote_problems(self.stack, self.tags({(lib["repo"], lib["tag"]): None}), self.crates())
+        self.assertEqual(missing, [f"tlinalg: tag {lib['tag']} not found on {lib['repo']}"])
+        moved = stackmod.remote_problems(self.stack, self.tags({(lib["repo"], lib["tag"]): "2" * 40}), self.crates())
+        self.assertIn(f"tlinalg: tag {lib['tag']} is {'2' * 40}", moved[0])
+
+    def test_an_unpublished_or_foreign_crate_version_is_named(self):
+        lib = self.libs["tenferro"]
+        key = (lib["crate"], lib["version"])
+        absent = stackmod.remote_problems(self.stack, self.tags(), self.crates({key: (False, None)}))
+        self.assertEqual(absent, [f"tenferro: {lib['crate']} {lib['version']} is not on crates.io"])
+        foreign = stackmod.remote_problems(self.stack, self.tags(), self.crates({key: (True, "3" * 40)}))
+        self.assertIn("was published from " + "3" * 40, foreign[0])
+        unrecorded = stackmod.remote_problems(self.stack, self.tags(), self.crates({key: (True, None)}))
+        self.assertEqual(unrecorded, [])
 
 
 class SyncPinsTest(unittest.TestCase):
@@ -370,12 +409,12 @@ class StackStatusTest(unittest.TestCase):
         write(repo, "data/results/p/s/20261001T010101Z-a/run.yaml", "x")
         write(repo, "data/results/p/s/20261027T051928Z-b/run.yaml", "x")
         row = next(r for r in self.table(lambda n: "[]") if r.startswith("| tlinalg-benchmark"))
-        self.assertIn("tlinalg-rs.rev 88a2ffe = stack", row)
+        self.assertIn(f"tlinalg-rs.rev {commit[:7]} = stack", row)
         self.assertIn("20261027T051928 (data/results/p/s/20261027T051928Z-b)", row)
         self.assertIn("no runs", row)
         write(repo, "pins/tlinalg-rs.rev", "1" * 40 + "\n")
         row = next(r for r in self.table(lambda n: "[]") if r.startswith("| tlinalg-benchmark"))
-        self.assertIn("1111111 != stack 88a2ffe", row)
+        self.assertIn(f"1111111 != stack {commit[:7]}", row)
 
     def test_gh_failures_degrade_per_cell(self):
         def missing(name):

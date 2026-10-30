@@ -9,16 +9,18 @@
 # `campaign_toolkit/stack/stack-pins.yaml` is the packaged copy that an installed toolkit
 # reads; a test fails if the two differ. Edit this one and copy it over.
 #
-# State recorded 2026-10-30 from the pins committed in the repositories at that date.
+# State: the releases of 2026-10-30 (t4a-faer 0.27.1, tlinalg 0.8.0, tcontract 0.9.0,
+# cpueinsum 0.9.0, tenferro v0.8.0) and tensor4all-rs main on tenferro v0.8.0. Every tag,
+# commit and crates.io version is checked with `python -m campaign_toolkit.stack --remote`.
 schema_version: 1
 
 libraries:
   t4a-faer:
     repo: https://github.com/tensor4all/faer
     crate: t4a-faer
-    version: "0.25.0"
-    tag: faer-v0.25.0
-    commit: 0e15729ad011e3813a41c168167ec61ed11a9dbb
+    version: "0.27.1"
+    tag: faer-v0.27.1
+    commit: 3a8edf02b82eb6c69362799591e0a970c4ceb8d3
     note: the tensor4all fork of faer; the measured library of the faer campaign
   faer-upstream:
     repo: https://codeberg.org/sarah-quinones/faer
@@ -26,19 +28,19 @@ libraries:
     version: "0.24.4"
     tag: faer-v0.24.4
     commit: 0539947ffb757a739d7e703a7d2fa0c792a909c1
-    note: the upstream release the fork is based on (reference arm); the pin file names the tag
+    note: the newest upstream release, an ancestor of t4a-faer 0.27.1 (the fork also merged upstream main up to the untagged 0ecd846, 2026-10-17); the reference arm, the pin file names the tag
   tlinalg:
     repo: https://github.com/tensor4all/tlinalg-rs
     crate: tlinalg
-    version: "0.6.0"
-    tag: v0.6.0
-    commit: 88a2ffeea4c5ef514dac91b2ea65d43c52b121e9
+    version: "0.8.0"
+    tag: v0.8.0
+    commit: 53d1f0d9f44378596c4f2bce932e45cc961b0d78
   tcontract:
     repo: https://github.com/tensor4all/tcontract-rs
     crate: tcontract
-    version: "0.6.0"
-    tag: v0.6.0
-    commit: 71a11a80b454fec3e465c62dd00a6294d3254c1d
+    version: "0.9.0"
+    tag: v0.9.0
+    commit: 9f793ede6b8076fd7ce2251594a9552ad66aa339
   tcontract-v1:
     repo: https://github.com/tensor4all/tcontract-rs
     crate: tcontract
@@ -49,9 +51,9 @@ libraries:
   cpueinsum:
     repo: https://github.com/tensor4all/cpueinsum-rs
     crate: cpueinsum
-    version: "0.6.0"
-    tag: v0.6.0
-    commit: 938a25fba9e76fb17dff6086db59e592f918ec22
+    version: "0.9.0"
+    tag: v0.9.0
+    commit: 124aa12d7c70ae4e5d0f499c549999469118f6de
   einsum-corpus:
     repo: https://github.com/tensor4all/tenferro-einsum-benchmark
     crate: null
@@ -61,18 +63,18 @@ libraries:
     note: the einsum instance corpus (14 instances) the cpueinsum campaign reads; main, there is no release
   tenferro:
     repo: https://github.com/tensor4all/tenferro-rs
-    crate: tenferro
-    version: "0.7.1"
-    tag: null
-    commit: 8fec1ca70852b930c092e7177c30bb8af7594a57
-    note: git dependency, 795 commits past the v0.7.1 tag (git describe v0.7.1-795-g8fec1ca7); no tag of its own
+    crate: tenferro-runtime
+    version: "0.8.0"
+    tag: v0.8.0
+    commit: a9f494cc4679387c75af698b299c316fd2295fe4
+    note: the v0.8.0 release (all tenferro-* crates at 0.8.0 from this commit); tenferro-runtime is the crate tensor4all-rs imports as `tenferro`
   tensor4all-rs:
     repo: https://github.com/tensor4all/tensor4all-rs
     crate: tensor4all-core
     version: null
     tag: null
-    commit: a5157385f58048355a28a6a003d4cb63d3b1349b
-    note: git dependency of the tensor4all benchmark
+    commit: 12f14b9b3920fdec6f4fd1b5dde513f76586b0ec
+    note: git dependency of the tensor4all benchmark; main at tensor4all-rs#1036, the first commit on tenferro v0.8.0 (and hataori c0990c40, which pins the same tenferro)
 
 # The nine benchmark repositories the patrol covers. `consumes` says where each one carries
 # a pin: a `rev-file` is a `pins/<name>.rev` file (`#` comments allowed, the last other line

@@ -124,15 +124,81 @@ def short(value) -> str:
     return value[:7] if re.fullmatch(r"[0-9a-f]{40}", value or "") else (value or "")
 
 
+def tag_commit(repo: str, tag: str):
+    """The commit `tag` names on `repo` (an annotated tag is peeled), or None when there is no such tag."""
+    import subprocess
+    out = subprocess.run(["git", "ls-remote", "--tags", repo, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"],
+                         capture_output=True, text=True, check=True, timeout=120).stdout
+    refs = dict(reversed(line.split("\t")) for line in out.splitlines() if "\t" in line)
+    return refs.get(f"refs/tags/{tag}^{{}}") or refs.get(f"refs/tags/{tag}")
+
+
+def crate_commit(crate: str, version: str):
+    """`(exists, sha1)` for a crates.io release: sha1 is the archive's `.cargo_vcs_info.json`
+    commit, None when the archive records none."""
+    import io
+    import tarfile
+    import urllib.error
+    import urllib.request
+    url = f"https://static.crates.io/crates/{crate}/{crate}-{version}.crate"
+    request = urllib.request.Request(url, headers={"User-Agent": "campaign-toolkit (stack --remote)"})
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 404):
+            return False, None
+        raise
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        try:
+            member = archive.extractfile(f"{crate}-{version}/.cargo_vcs_info.json")
+        except KeyError:
+            return True, None
+        return True, json.load(member)["git"]["sha1"]
+
+
+def remote_problems(stack, tag_commit=tag_commit, crate_commit=crate_commit) -> list:
+    """What the published world disagrees with: a declared tag that is missing or names another
+    commit, and a declared crate version that is not on crates.io or was published from another
+    commit. A library without a tag or version is not checked for it."""
+    problems = []
+    for name, lib in stack["libraries"].items():
+        if lib["tag"]:
+            found = tag_commit(lib["repo"], lib["tag"])
+            if found is None:
+                problems.append(f"{name}: tag {lib['tag']} not found on {lib['repo']}")
+            elif found != lib["commit"]:
+                problems.append(f"{name}: tag {lib['tag']} is {found}, stack says {lib['commit']}")
+        if lib["crate"] and lib["version"]:
+            exists, sha1 = crate_commit(lib["crate"], lib["version"])
+            if not exists:
+                problems.append(f"{name}: {lib['crate']} {lib['version']} is not on crates.io")
+            elif sha1 is not None and sha1 != lib["commit"]:
+                problems.append(f"{name}: {lib['crate']} {lib['version']} was published from {sha1}, "
+                                f"stack says {lib['commit']}")
+    return problems
+
+
 def main(argv=None) -> int:
-    """`python -m campaign_toolkit.stack [FILE]`: validate a stack file (default: the shipped one)."""
+    """`python -m campaign_toolkit.stack [--remote] [FILE]`: validate a stack file (default: the
+    shipped one); `--remote` also checks every tag and crates.io version against its commit."""
     import sys
+    argv = list(argv or [])
+    remote = "--remote" in argv
+    argv = [a for a in argv if a != "--remote"]
     try:
         stack = load(argv[0] if argv else None)
     except StackError as exc:
         print(f"FAIL {exc}", file=sys.stderr)
         return 1
     print(f"stack ok: {len(stack['libraries'])} librar(ies), {len(stack['repositories'])} repositories")
+    if remote:
+        problems = remote_problems(stack)
+        for problem in problems:
+            print(f"FAIL {problem}", file=sys.stderr)
+        if problems:
+            return 1
+        print("remote ok: every tag and crates.io version matches its commit")
     return 0
 
 
