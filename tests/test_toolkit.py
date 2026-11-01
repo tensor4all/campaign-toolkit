@@ -121,6 +121,7 @@ class FixtureCampaignTest(unittest.TestCase):
         runs = sorted((self.root / RUN_A_REL).parent.glob('*-probe'))
         manifest = campaign.load(runs[-1] / 'run.yaml')
         self.assertIs(manifest['local_commits_allowed'], True)
+        self.assertNotIn('pre_release', manifest)
 
     def test_pre_release_is_rejected_for_publication_but_valid_for_comparison(self):
         path = self.root / RUN_A_REL / 'run.yaml'
@@ -376,6 +377,27 @@ class FixtureCampaignTest(unittest.TestCase):
             self.assertIn('--corpus', argv)
             self.assertIn('fixture-instances', argv)
 
+    def test_pre_release_requires_no_publish_before_build(self):
+        for extra in ([], ['--allow-local-commits']):
+            with self.subTest(extra=extra), mock.patch.object(record_run, 'build') as build:
+                with self.assertRaises(SystemExit) as raised, contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    record_run.main(['fixture-cpu', 'fixture-kernels', '--pre-release', *extra], root=self.root)
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn('--pre-release requires --no-publish', stderr.getvalue())
+                build.assert_not_called()
+
+    def test_record_pre_release_is_marked_and_cannot_be_published(self):
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        run = self._record('fixture-kernels', 'candidate', source_csv, extra=['--pre-release'],
+                           identity={'vendor.name': 'openblas'})
+        manifest = campaign.load(run / 'run.yaml')
+        self.assertIs(manifest['pre_release'], True)
+        self.assertTrue(any('pre_release: true' in error for error in validate_run.validate(run / 'run.yaml')))
+        self.assertEqual(validate_run.validate(run / 'run.yaml', allow_pre_release=True), [])
+        with self.assertRaisesRegex(SystemExit, 'pre_release: true'):
+            publish_report.publish(run)
+
     def _record(self, suite_id, label, source_csv, extra=(), identity=None, external_json=None):
         """Record one run through the recorder with the build and measurement side mocked.
 
@@ -396,10 +418,12 @@ class FixtureCampaignTest(unittest.TestCase):
                                                stdout='all comparisons within tolerance', stderr='')
 
         def child(module, args, **kwargs):
+            self.assertNotEqual(module, 'publish_report')
             if module == 'validate_run':
-                errors = validate_run.validate(args[0])
-                return subprocess.CompletedProcess(args, 1 if errors else 0,
-                                                   stdout='\n'.join(errors), stderr='')
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    code = validate_run.main(args, root=self.root)
+                return subprocess.CompletedProcess(args, code, stdout=output.getvalue(), stderr='')
             return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
 
         argv = ['fixture-cpu', suite_id, '--threads', '1', '--label', label, '--no-publish', *extra]
