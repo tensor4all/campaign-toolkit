@@ -9,19 +9,20 @@
 # `campaign_toolkit/stack/stack-pins.yaml` is the packaged copy that an installed toolkit
 # reads; a test fails if the two differ. Edit this one and copy it over.
 #
-# State: the releases of 2026-10-30 (t4a-faer 0.27.1, tlinalg 0.8.0, tcontract 0.9.0,
-# cpueinsum 0.9.0, tenferro v0.8.0) and tensor4all-rs main on tenferro v0.8.0. Every tag,
-# commit and crates.io version is checked with `python -m campaign_toolkit.stack --remote`.
+# State: t4a-faer main at 71b25ffb for the evo recording, plus the other releases of
+# 2026-10-30 and tensor4all-rs main on tenferro v0.8.0. Declared release tags and crate
+# versions are checked with `python -m campaign_toolkit.stack --remote`; an unreleased
+# commit has null tag/version and makes no claim about a published crate.
 schema_version: 1
 
 libraries:
   t4a-faer:
     repo: https://github.com/tensor4all/faer
     crate: t4a-faer
-    version: "0.27.1"
-    tag: faer-v0.27.1
-    commit: 3a8edf02b82eb6c69362799591e0a970c4ceb8d3
-    note: the tensor4all fork of faer; the measured library of the faer campaign
+    version: null
+    tag: null
+    commit: 71b25ffb7ae3ce038ec25b35c91e526be41b9a63
+    note: "unreleased tensor4all/faer main including #177; measured by the evo pub-71b25ffb-20261031 runs, not a claim about the published t4a-faer 0.27.1 crate"
   faer-upstream:
     repo: https://codeberg.org/sarah-quinones/faer
     crate: faer
