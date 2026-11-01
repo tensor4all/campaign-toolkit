@@ -13,8 +13,8 @@ Order matters and is enforced here:
    timing, and a mismatch aborts the run (nothing is published from an
    unverified run);
 4. each measurement goes through the pinned, idle-checked protocol script;
-5. the manifest is validated against its schema *before* it is written, and the
-   recorded commit must resolve in the checkout it names.
+5. the written manifest is validated against its schema, and the recorded commit
+   must resolve in the checkout it names.
 
 The harness's `info` output and its CSV columns are its contract with the
 recorder: `info` prints one `key=value` per line (the vendor identity is read
@@ -824,10 +824,14 @@ def main(argv=None, root=None):
     ap.add_argument("--label", default=None, help="suffix for the run directory")
     ap.add_argument('--no-publish', action='store_true',
                     help='retain and validate run artifacts without publishing a result page')
+    ap.add_argument('--pre-release', action='store_true',
+                    help='mark candidate evidence as pre-release; requires --no-publish')
     ap.add_argument('--allow-local-commits', action='store_true',
                     help='for a throwaway probe: do not require the recorded source commits to exist '
                          'on their remotes. The manifest records it and the run is never published.')
     args = ap.parse_args(argv)
+    if args.pre_release and not args.no_publish:
+        ap.error('--pre-release requires --no-publish; pre-release runs cannot be published')
 
     profiles = d.profiles()
     suite = yaml.safe_load(d.suite_path(args.suite_id).read_text())
@@ -1154,6 +1158,7 @@ def main(argv=None, root=None):
         **({"vendor": vendor_record} if vendor_record else {}),
         "harness": harness,
         **({"local_commits_allowed": True} if args.allow_local_commits else {}),
+        **({"pre_release": True} if args.pre_release else {}),
         **({'toolkit': toolkit, 'verification_files': verification_files,
             'binary': {'path': str(binary), 'sha256': binary_sha256}} if v2 else {}),
         "host": host_info(args.profile, profiles),
@@ -1207,7 +1212,8 @@ def main(argv=None, root=None):
 
     manifest_path = run_dir / "run.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
-    v = descriptor.run_module("validate_run", [str(manifest_path)], root=d.root, capture=True)
+    validate_args = [str(manifest_path)] + (['--allow-pre-release'] if args.pre_release else [])
+    v = descriptor.run_module("validate_run", validate_args, root=d.root, capture=True)
     print(v.stdout + v.stderr, file=sys.stderr)
     if v.returncode != 0:
         sys.exit("ERROR: run.yaml does not validate; nothing published")
