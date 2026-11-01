@@ -122,6 +122,36 @@ class FixtureCampaignTest(unittest.TestCase):
         manifest = campaign.load(runs[-1] / 'run.yaml')
         self.assertIs(manifest['local_commits_allowed'], True)
 
+    def test_pre_release_is_rejected_for_publication_but_valid_for_comparison(self):
+        path = self.root / RUN_A_REL / 'run.yaml'
+        manifest = yaml.safe_load(path.read_text())
+        self.assertEqual(validate_run.validate(path, check_git=False), [])
+        manifest['pre_release'] = True
+        path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+        self.assertTrue(any('pre_release: true' in error for error in
+                            validate_run.validate(path, check_git=False)))
+        self.assertEqual(validate_run.validate(path, check_git=False, allow_pre_release=True), [])
+        manifest['pre_release'] = False
+        path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+        self.assertEqual(validate_run.validate(path, check_git=False), [])
+
+    def test_publish_refuses_pre_release_without_changing_outputs(self):
+        run_dir = self.root / RUN_A_REL
+        manifest_path = run_dir / 'run.yaml'
+        manifest = yaml.safe_load(manifest_path.read_text())
+        manifest['pre_release'] = True
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+        page = publish_report.page_path(manifest)
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text('existing page')
+        index = self.root / 'result/INDEX.md'
+        index.parent.mkdir(parents=True, exist_ok=True)
+        index.write_text('existing index')
+        with self.assertRaisesRegex(SystemExit, 'pre_release: true'):
+            publish_report.publish(run_dir)
+        self.assertEqual(page.read_text(), 'existing page')
+        self.assertEqual(index.read_text(), 'existing index')
+
     def test_publish_refuses_a_local_commits_run(self):
         run_dir = self.root / RUN_A_REL
         manifest = yaml.safe_load((run_dir / 'run.yaml').read_text())
