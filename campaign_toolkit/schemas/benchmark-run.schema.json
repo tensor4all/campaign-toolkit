@@ -231,6 +231,10 @@
         }
       }
     },
+    "pre_release": {
+      "type": "boolean",
+      "description": "A pre-release run is candidate evidence only and must not be published. Absent in older runs."
+    },
     "local_commits_allowed": {
       "type": "boolean",
       "description": "Present (true) only when the run was recorded with `--allow-local-commits`: a source commit it records may exist only in a local checkout, so CI cannot resolve it. Such a run is a throwaway probe and `publish_report` refuses to publish it."

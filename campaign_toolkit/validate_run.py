@@ -185,7 +185,7 @@ def check_commit(identity, info, errors):
                   f"checkout ({tried})")
 
 
-def validate(path, check_git=True):
+def validate(path, check_git=True, allow_pre_release=False):
     errors = []
     manifest = load(path)
     schema = json.loads((descriptor.schemas_dir() / "benchmark-run.schema.json").read_text())
@@ -193,6 +193,9 @@ def validate(path, check_git=True):
         jsonschema_lite.validate(manifest, schema)
     except jsonschema_lite.ValidationError as e:
         return [f"schema: {e.json_path}: {e.message}"]
+
+    if manifest.get("pre_release") and not allow_pre_release:
+        errors.append("pre_release: true: this run is for merge decisions only and cannot be published")
 
     if manifest["target_profile"] not in known_profiles():
         errors.append(f"target_profile {manifest['target_profile']!r} is not in "
@@ -253,10 +256,12 @@ def main(argv=None, root=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("manifest", nargs="+")
     ap.add_argument("--no-git", action="store_true")
+    ap.add_argument("--allow-pre-release", action="store_true",
+                    help="validate unpublished candidate evidence, not for publication")
     args = ap.parse_args(argv)
     failed = False
     for m in args.manifest:
-        errors = validate(m, check_git=not args.no_git)
+        errors = validate(m, check_git=not args.no_git, allow_pre_release=args.allow_pre_release)
         if errors:
             failed = True
             print(f"FAIL {m}")
