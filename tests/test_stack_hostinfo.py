@@ -258,7 +258,9 @@ class StackFilesTest(unittest.TestCase):
         self.assertTrue(commits["tcontract-v1"].startswith("8abfa38"))
         self.assertTrue(commits["cpueinsum"].startswith("124aa12"))
         self.assertTrue(commits["einsum-corpus"].startswith("753c0b3"))
-        self.assertTrue(commits["tenferro"].startswith("a9f494c"))
+        self.assertTrue(commits["tenferro"].startswith("58fff23"))
+        self.assertIsNone(libs["tenferro"]["version"])
+        self.assertIsNone(libs["tenferro"]["tag"])
         self.assertTrue(commits["tensor4all-rs"].startswith("12f14b9"))
         self.assertEqual(libs["faer-upstream"]["tag"], "faer-v0.24.4")
 
@@ -302,10 +304,10 @@ class StackRemoteTest(unittest.TestCase):
         self.assertIn(f"tlinalg: tag {lib['tag']} is {'2' * 40}", moved[0])
 
     def test_an_unpublished_or_foreign_crate_version_is_named(self):
-        lib = self.libs["tenferro"]
+        lib = self.libs["tlinalg"]
         key = (lib["crate"], lib["version"])
         absent = stackmod.remote_problems(self.stack, self.tags(), self.crates({key: (False, None)}))
-        self.assertEqual(absent, [f"tenferro: {lib['crate']} {lib['version']} is not on crates.io"])
+        self.assertEqual(absent, [f"tlinalg: {lib['crate']} {lib['version']} is not on crates.io"])
         foreign = stackmod.remote_problems(self.stack, self.tags(), self.crates({key: (True, "3" * 40)}))
         self.assertIn("was published from " + "3" * 40, foreign[0])
         unrecorded = stackmod.remote_problems(self.stack, self.tags(), self.crates({key: (True, None)}))
