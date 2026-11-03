@@ -68,8 +68,8 @@ libraries:
     crate: tenferro-runtime
     version: null
     tag: null
-    commit: 58fff234db9a421afe0699f8b04f7e64cb1b941a
-    note: "tenferro-rs main on the 0.9.0 train, after the untagged v0.8.1: the CUDA einsum ownership fix (tenferro-rs#2363) is in no release, and the weekly GPU campaign measures this revision until 0.9.0 ships; tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
+    commit: a000e5c4929d5bebb91e783c329b27106baed12e
+    note: "tenferro-rs main on the 0.9.0 train, after the untagged v0.8.1: the CUDA einsum ownership fix (tenferro-rs#2363) and the optional cuSOLVER batched eigh load (tenferro-rs#2414) are in no release, and the weekly GPU campaign measures this revision until 0.9.0 ships; tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
   tensor4all-rs:
     repo: https://github.com/tensor4all/tensor4all-rs
     crate: tensor4all-core
