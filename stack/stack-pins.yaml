@@ -68,8 +68,8 @@ libraries:
     crate: tenferro-runtime
     version: null
     tag: null
-    commit: a000e5c4929d5bebb91e783c329b27106baed12e
-    note: "tenferro-rs main at the tenferro-rs#2414 squash: cuSOLVER batched eigh loads optionally and the capability is decided at runtime from cusolverGetVersion() >= 11701, falling back to the per-matrix syevd loop, so a cuSOLVER older than 11.7.1 no longer fails to open the whole binding and this pin is host-independent; it clears the weekly GPU dense qr/solve/svd/eigh red; tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
+    commit: 9a850b06155405acc99ecd0648829e9e6d3866ba
+    note: "tenferro-rs main after tenferro-rs#2439 (traced values are owned by a TraceContext; the context-free TracedTensor constructors are gone) and #2490 (an external payload's view request answers None); tenferro-benchmark#364 builds against it, so the weekly GPU build is green again; tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
   tensor4all-rs:
     repo: https://github.com/tensor4all/tensor4all-rs
     crate: tensor4all-core

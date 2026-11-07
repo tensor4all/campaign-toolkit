@@ -258,7 +258,7 @@ class StackFilesTest(unittest.TestCase):
         self.assertTrue(commits["tcontract-v1"].startswith("8abfa38"))
         self.assertTrue(commits["cpueinsum"].startswith("124aa12"))
         self.assertTrue(commits["einsum-corpus"].startswith("753c0b3"))
-        self.assertTrue(commits["tenferro"].startswith("a000e5c"))
+        self.assertTrue(commits["tenferro"].startswith("9a850b0"))
         self.assertIsNone(libs["tenferro"]["version"])
         self.assertIsNone(libs["tenferro"]["tag"])
         self.assertTrue(commits["tensor4all-rs"].startswith("12f14b9"))
