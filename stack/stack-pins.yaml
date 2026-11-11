@@ -10,10 +10,11 @@
 # reads; a test fails if the two differ. Edit this one and copy it over.
 #
 # State: published t4a-faer 0.28.0, the other releases of 2026-10-30, tenferro-rs main
-# (untagged, after v0.8.1) and tensor4all-rs main, whose own git dependency stays on
-# tenferro v0.8.0. Every declared tag and crates.io source commit is checked with
-# `python -m campaign_toolkit.stack --remote`; t4a-faer 0.28.0 and tenferro-rs main have
-# no remote tag.
+# (untagged, after v0.8.1), tensor4all-rs main, whose own git dependency stays on
+# tenferro v0.8.0, and tcontract-rs main (untagged, at the qcbench harness merge, which is
+# in no release). Every declared tag and crates.io source commit is checked with
+# `python -m campaign_toolkit.stack --remote`; t4a-faer 0.28.0, tenferro-rs main and
+# tcontract-rs main have no remote tag.
 schema_version: 1
 
 libraries:
@@ -40,9 +41,10 @@ libraries:
   tcontract:
     repo: https://github.com/tensor4all/tcontract-rs
     crate: tcontract
-    version: "0.9.0"
-    tag: v0.9.0
-    commit: 9f793ede6b8076fd7ce2251594a9552ad66aa339
+    version: null
+    tag: null
+    commit: ebf0e50bc5b26c727eaf22213bd41900c17872c8
+    note: "tcontract-rs main at the qcbench harness merge (tensor4all/tcontract-rs#187): the harness is in no release yet - v0.12.0 (abf8c72) predates it - so the campaign measures this main head until a release contains it"
   tcontract-v1:
     repo: https://github.com/tensor4all/tcontract-rs
     crate: tcontract
