@@ -258,8 +258,8 @@ renderer.
 one row per `(campaign, page)`:
 
 ```bash
-campaign-union-index /path/to/tlinalg-benchmark /path/to/faer-benchmark --out union.md
-campaign-union-index /path/to/faer-benchmark/result/INDEX.md --out union.md
+campaign-union-index /path/to/tlinalg-benchmark /path/to/colmat-benchmark --out union.md
+campaign-union-index /path/to/colmat-benchmark/result/INDEX.md --out union.md
 ```
 
 Each input is a campaign root or the path to its published `result/INDEX.md`; a

@@ -321,9 +321,9 @@ class SyncPinsTest(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.stack = stackmod.load()
-        self.repo = self.tmp / "faer-benchmark"
+        self.repo = self.tmp / "colmat-benchmark"
         # What the pin must hold: the library's commit, or the stack's `measured` hold.
-        use = next(u for u in stackmod.repository(self.stack, "faer-benchmark")["consumes"]
+        use = next(u for u in stackmod.repository(self.stack, "colmat-benchmark")["consumes"]
                    if u["file"] == "pins/t4a-faer.rev")
         self.t4a = stackmod.expected(self.stack, use)
 

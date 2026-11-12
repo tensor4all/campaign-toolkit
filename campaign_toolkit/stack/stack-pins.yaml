@@ -13,6 +13,9 @@
 # `campaign-sync-pins` and `campaign-stack-status`, and is dropped in the change that records the
 # target and moves the pin.
 #
+# `colmat-benchmark` was `faer-benchmark` until the GitHub rename of 2026-11-13; run directories
+# recorded before it carry the old local path, which is history and is not rewritten.
+#
 # `campaign_toolkit/stack/stack-pins.yaml` is the packaged copy that an installed toolkit
 # reads; a test fails if the two differ. Edit this one and copy it over.
 #
@@ -95,7 +98,7 @@ libraries:
 # the sync tool; the others are checked and must be edited by hand. `run_dirs` are globs, below
 # the repository root, of the run directories whose names carry a timestamp.
 repositories:
-  - name: faer-benchmark
+  - name: colmat-benchmark
     consumes:
       - kind: rev-file
         file: pins/t4a-faer.rev

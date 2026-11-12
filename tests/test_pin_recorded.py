@@ -157,7 +157,7 @@ class MeasuredHoldTest(unittest.TestCase):
         self.assertTrue(any("drop the hold" in p for p in stackmod.validate(self.stack)))
 
     def test_a_hold_on_a_tag_pin_or_a_short_sha_is_refused(self):
-        faer = stackmod.repository(self.stack, "faer-benchmark")
+        faer = stackmod.repository(self.stack, "colmat-benchmark")
         tag_use = next(u for u in faer["consumes"] if u["field"] == "tag")
         tag_use.update(measured=A, note="n")
         self.assertTrue(any("not a tag pin" in p for p in stackmod.validate(self.stack)))
