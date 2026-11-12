@@ -53,7 +53,10 @@ def pin_cell(stack, repo, root) -> str:
     parts = []
     for use, want, found, ok in stackmod.compare(stack, repo, root):
         name = pathlib.PurePosixPath(use["file"]).name
-        if ok:
+        if ok and "measured" in use:
+            parts.append(f"{name} {stackmod.short(want)} = measured hold "
+                         f"(target {stackmod.short(stackmod.target(stack, use))} not recorded)")
+        elif ok:
             parts.append(f"{name} {stackmod.short(want)} = stack")
         elif found is None:
             parts.append(f"{name} missing (stack {stackmod.short(want)})")

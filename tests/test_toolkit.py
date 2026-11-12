@@ -24,8 +24,8 @@ TOOLKIT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TOOLKIT))
 
 from campaign_toolkit import (  # noqa: E402
-    campaign, compare_runs, declarations, descriptor, gen_index, jsonschema_lite, publish_report,
-    record_run, report_run, union_index, validate_run,
+    campaign, compare_runs, declarations, descriptor, gen_index, jsonschema_lite, pin_recorded,
+    publish_report, record_run, report_run, union_index, validate_run,
 )
 
 FIXTURE = TOOLKIT / "tests/fixture"
@@ -826,8 +826,25 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertIn("| missing |", text)
         self.assertEqual(len(self._links(history)), 1)
         self.assertIn("### `", history.read_text())
-        # Moving the pin before re-measuring keeps the gate green: currency, not the pin, decides.
+        # Moving the pin before re-measuring fails the gate: the pin has no current recording, and
+        # the message names the pin and both ways out.
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(gen_index.main(["--check"], root=self.root), 1)
+        self.assertIn("pins/fixture-rs.rev", err.getvalue())
+        self.assertIn("no current recording", err.getvalue())
+        self.assertIn("record a publication at the pin, or keep the pin at the last measured revision",
+                      err.getvalue())
+        # The standalone command says the same.
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(pin_recorded.main([], root=self.root), 1)
+
+    def test_check_passes_only_with_the_newest_publication_at_the_pin(self):
+        self._publish_a()
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
         self.assertEqual(gen_index.main(["--check"], root=self.root), 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(pin_recorded.main([], root=self.root), 0)
 
     def test_a_profile_named_twice_lists_each_page_once(self):
         suite = self.root / SUITE_REL
@@ -965,7 +982,8 @@ class FixtureCampaignTest(unittest.TestCase):
     def test_index_reports_absent_checkout_only_when_something_is_recorded(self):
         # A campaign that has measured nothing has no currency to compute, so an absent
         # checkout is a note rather than a failure; once a page exists it is the reason
-        # the index cannot say whether that page is current.
+        # the index cannot say whether that page is current. The check still fails on the pin:
+        # nothing is recorded at it, which is the one thing the gate does not let pass.
         root = pathlib.Path(self.tmp.name) / "empty"
         shutil.copytree(FIXTURE, root)
         shutil.rmtree(root / "extern", ignore_errors=True)
@@ -975,7 +993,12 @@ class FixtureCampaignTest(unittest.TestCase):
             "required_profiles:\n  - fixture-cpu\noptional_profiles: []",
             "required_profiles: []\noptional_profiles:\n  - fixture-cpu"))
         self.assertEqual(gen_index.main(["--write"], root=root), 0)
-        self.assertEqual(gen_index.main(["--check"], root=root), 0)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(gen_index.main(["--check"], root=root), 1)
+        self.assertNotIn("absent", err.getvalue())
+        self.assertIn("FAIL pins/fixture-rs.rev", err.getvalue())
+        self.assertEqual(len(err.getvalue().strip().splitlines()), 1, err.getvalue())
 
     def test_dual_identity_index_names_both_revisions(self):
         # A campaign that records a baseline prints the fork identity in every line that

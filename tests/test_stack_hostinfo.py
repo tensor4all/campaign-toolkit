@@ -257,7 +257,7 @@ class StackFilesTest(unittest.TestCase):
         self.assertTrue(commits["tcontract"].startswith("ebf0e50"))
         self.assertIsNone(libs["tcontract"]["version"])
         self.assertIsNone(libs["tcontract"]["tag"])
-        self.assertTrue(commits["tcontract-v1"].startswith("8abfa38"))
+        self.assertTrue(commits["tcontract-v1"].startswith("0df08df"))
         self.assertTrue(commits["cpueinsum"].startswith("124aa12"))
         self.assertTrue(commits["einsum-corpus"].startswith("753c0b3"))
         self.assertTrue(commits["tenferro"].startswith("9a850b0"))
@@ -322,7 +322,10 @@ class SyncPinsTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.stack = stackmod.load()
         self.repo = self.tmp / "faer-benchmark"
-        self.t4a = self.stack["libraries"]["t4a-faer"]["commit"]
+        # What the pin must hold: the library's commit, or the stack's `measured` hold.
+        use = next(u for u in stackmod.repository(self.stack, "faer-benchmark")["consumes"]
+                   if u["file"] == "pins/t4a-faer.rev")
+        self.t4a = stackmod.expected(self.stack, use)
 
     def run_sync(self, *args):
         out = io.StringIO()
