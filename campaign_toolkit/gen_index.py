@@ -29,8 +29,9 @@ The index is centred on the current pins. Its one table lists, per cell, the pag
 at the reference revisions (every recorded identity: the library commit, and for a campaign
 that records a baseline the upstream commit or tag); every other page is listed in the
 generated `HISTORY.md` beside it, newest first and grouped by the revisions it measured.
-"At the pin" decides what is shown; currency (`status`) still decides the `--check` gate, so
-moving a pin before re-measuring keeps CI green while the page moves to the history.
+"At the pin" decides what is shown. `--check` also fails when the pins name a revision no
+publication was measured at, or when the newest publication was measured elsewhere
+(`pin_recorded`): moving a pin ahead of its recording is an error, not a state the index shows.
 
 Currency needs the measured checkouts. An absent one is reported only when there
 is a recorded page whose currency it would decide; with nothing recorded there is
@@ -43,7 +44,7 @@ import re
 import subprocess
 import sys
 
-from . import descriptor
+from . import descriptor, pin_recorded
 from .campaign import coverage_of, load, page_relative, page_source, run_spec, vendor_engines
 
 
@@ -432,8 +433,10 @@ def render(pages, declared, references, generated, resolved=None):
         "`missing` is a normal cell, not an error: the campaign is not run on every",
         "profile for every commit. A cell is listed here only with a page measured at the",
         "reference revisions; every other page is in the history. `status` is currency: a page",
-        "measured before the pin moved can still be `current` (no invalidating commit since), and",
-        "the `--check` gate follows currency, so moving a pin before re-measuring does not fail CI.",
+        "measured before the pin moved can still be `current` (no invalidating commit since). The",
+        "`--check` gate fails when no publication was measured at the pins, or when the newest",
+        "publication was measured elsewhere: record at the pin, or keep the pin at the last",
+        "measured revision.",
         "`coverage` relates a page to the *current* declaration: `full` when it was measured over",
         "the whole spec and the declaration has not moved since, `partial` when it covered a",
         "subset, and `declaration-changed` when the declaration itself changed after the",
@@ -561,6 +564,7 @@ def main(argv=None, root=None):
         problems.append(f"generated index links to {target}, which does not exist")
 
     if args.check:
+        problems += pin_recorded.campaign_problems(found)
         for path, body in outputs:
             if not path.exists() or path.read_text() != body:
                 problems.append(f"{path.relative_to(d.root)} is out of date; run "

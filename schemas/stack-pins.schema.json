@@ -116,6 +116,14 @@
                 "key": {
                   "type": "string",
                   "description": "workflow-env only: the variable name."
+                },
+                "measured": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "description": "A hold: the revision this repository last recorded, while the library's commit is not recorded yet. The pin must equal it. Requires a `note`; dropped when the library's revision is recorded."
+                },
+                "note": {
+                  "type": "string"
                 }
               }
             }

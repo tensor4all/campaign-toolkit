@@ -26,6 +26,7 @@ campaign-sync-pins = "campaign_toolkit.sync_pins:main"
 campaign-stack-status = "campaign_toolkit.stack_status:main"
 campaign-trend = "campaign_toolkit.trend:main"
 campaign-check-generated = "campaign_toolkit.check_generated:main"
+campaign-check-pin-recorded = "campaign_toolkit.pin_recorded:main"
 
 [tool.setuptools]
 packages = ["campaign_toolkit"]

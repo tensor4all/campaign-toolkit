@@ -45,6 +45,12 @@ def validate(stack) -> list:
                 problems.append(f"{where}: unknown library {use['library']!r}")
             elif library[use["field"]] is None:
                 problems.append(f"{where}: library {use['library']!r} has no {use['field']}")
+            if "measured" in use and use["field"] != "commit":
+                problems.append(f"{where}: a `measured` hold replaces a commit pin, not a {use['field']} pin")
+            if "measured" in use and library is not None and use["measured"] == library["commit"]:
+                problems.append(f"{where}: `measured` equals the library's commit; drop the hold")
+            if "measured" in use and not use.get("note"):
+                problems.append(f"{where}: a `measured` hold carries a `note` saying why")
             if use["kind"] == "rev-file" and not (use["file"].startswith("pins/") and use["file"].endswith(".rev")):
                 problems.append(f"{where}: a rev-file lives at pins/<name>.rev")
             if use["kind"] == "workflow-env" and "key" not in use:
@@ -68,8 +74,16 @@ def repository(stack, name):
     return next((r for r in stack["repositories"] if r["name"] == name), None)
 
 
-def expected(stack, use) -> str:
+def target(stack, use) -> str:
+    """What the stack declares for the library: the revision the next campaign is to measure."""
     return stack["libraries"][use["library"]][use["field"]]
+
+
+def expected(stack, use) -> str:
+    """What the repository's pin must hold: the library's revision, or, while the repository has
+    not yet recorded that revision, the `measured` revision it is held at. A hold is declared in
+    the stack and printed by every tool that reads it; it is never inferred."""
+    return use.get("measured") or target(stack, use)
 
 
 def rev_file_value(text: str) -> str:

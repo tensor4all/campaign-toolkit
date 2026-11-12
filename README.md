@@ -50,7 +50,8 @@ Console entry points (`campaign-record-run`, `campaign-validate-run`,
 `campaign-gen-index`, `campaign-publish-report`, `campaign-compare-runs`,
 `campaign-report-run`, `campaign-descriptor`,
 `campaign-validate-declarations`, `campaign-union-index`, `campaign-sync-pins`,
-`campaign-stack-status`, `campaign-trend`, `campaign-check-generated`) are declared in
+`campaign-stack-status`, `campaign-trend`, `campaign-check-generated`,
+`campaign-check-pin-recorded`) are declared in
 `pyproject.toml`.
 
 ## Recording a run
@@ -151,6 +152,12 @@ campaign-sync-pins --check        # write nothing; exit 1 naming each pin that i
 campaign-stack-status             # the daily patrol: one Markdown row per repository (pins, newest run, CI)
 ```
 
+A library's revision is the *target* of the next campaign; a repository's pin is what its pages
+were measured at, and the pin-recorded gate refuses a pin no publication was measured at. Until a
+repository records the target, its `consumes` entry carries `measured: <commit>` and a `note`:
+the pin must equal that hold, `campaign-sync-pins` and `campaign-stack-status` print it beside the
+target, and the change that records the target and moves the pin drops it.
+
 `campaign_toolkit/stack/stack-pins.yaml` is the copy an installed toolkit reads (`--stack`
 overrides it); a test fails if it differs from `stack/stack-pins.yaml`, which is the one to edit.
 `campaign-stack-status` looks for the checkouts beside the toolkit checkout (`--checkouts DIR`),
@@ -175,9 +182,19 @@ into every new manifest; they are optional in the schema, so older manifests sti
 - `HISTORY.md`: every other page, newest first, grouped by the revisions it measured.
   `INDEX.md` links it in one line at the top.
 
-`--check` checks both files. The gate follows *currency* (`status`), not the pin: a page
-measured before the pin moved can still be `current`, so moving a pin before re-measuring
-keeps CI green while its page moves to the history.
+`--check` checks both files, and fails closed on the pin (`campaign_toolkit.pin_recorded`): at
+least one publication must have been measured at the pins (every recorded identity), and the
+newest publication must be one of them. Moving a pin ahead of its recording therefore fails CI,
+with a message naming the pin and the two ways out: record a publication at the pin, or keep the
+pin at the last measured revision. There is no flag to switch this off.
+
+`campaign-check-pin-recorded` runs the same rule on its own. Without arguments it reads the
+campaign (`CAMPAIGN_ROOT`, `CAMPAIGN_DESCRIPTOR`). For a tree the descriptor does not describe it
+takes the evidence directly: `--pin pins/x.rev --evidence GLOB --commit-field KEY
+[--time-field timestamp] [--page TEMPLATE]`, where each file matching the glob (JSON or YAML) is a
+publication, the fields are dotted keys, and `--page` (a `str.format` template over the file's
+top-level fields plus `commit`) names the page a file needs to count. A file without a commit or a
+time is a failure, not skipped.
 
 `python -m campaign_toolkit.site --root <campaign>` writes the campaign's site into the
 result directory: `index.html` with one section per hardware profile (in the order of

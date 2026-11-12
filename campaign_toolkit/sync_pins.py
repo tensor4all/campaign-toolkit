@@ -10,6 +10,11 @@ the `#` comments a pin file carries to say how a revision was determined are kep
 file is written with a one-line header. `--check` writes nothing and exits 1 listing every pin
 that is missing or differs. Pins the stack declares in a workflow or a Cargo manifest are
 checked in both modes and are never rewritten; edit those by hand.
+
+A `consumes` entry may carry `measured: <commit>` (with a `note`): the repository has not recorded
+the library's revision yet, so its pin is held at the revision it last measured. The pin must then
+equal the hold, and the hold is printed beside it. `campaign-check-pin-recorded` (and
+`gen_index --check`) is what refuses a pin with no recording; the hold is how the stack says so.
 """
 import argparse
 import pathlib
@@ -35,8 +40,10 @@ def sync(stack, repo, root, check, out) -> int:
     bad = 0
     for use, want, found, ok in stackmod.compare(stack, repo, root):
         label = f"{repo['name']}: {use['file']}"
+        held = f" (held at the measured revision; the stack's target {stackmod.short(stackmod.target(stack, use))} " \
+               f"is not recorded yet)" if "measured" in use else ""
         if ok:
-            print(f"ok   {label} = {stackmod.short(want)}", file=out)
+            print(f"ok   {label} = {stackmod.short(want)}{held}", file=out)
             continue
         if use["kind"] == "rev-file" and not check:
             path = root / use["file"]
@@ -46,7 +53,7 @@ def sync(stack, repo, root, check, out) -> int:
             continue
         bad += 1
         have = "missing file" if found is None else (", ".join(found) or "no value") + " found"
-        print(f"FAIL {label}: stack says {want}; {have}", file=out)
+        print(f"FAIL {label}: stack says {want}{held}; {have}", file=out)
     return bad
 
 
