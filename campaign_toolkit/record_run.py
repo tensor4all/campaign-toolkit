@@ -39,6 +39,7 @@ import time
 import yaml
 
 from . import descriptor, hostinfo, observer_audit
+from . import link_preflight
 from .campaign import (check_cpu_sets, cpu_sets_for, engines_for_vendor, populations, provider_of,
                        same_populations, vendor_engines)
 
@@ -887,6 +888,15 @@ def main(argv=None, root=None):
     external = (load_external_providers(args.external_provider_json)
                 if args.external_provider_json else [])
     require_external_identities(engines, external)
+    # Before anything that takes minutes -- the CPU checks, the lock, the build, any timing: every
+    # library this arm links has to link and load on this host, with the build's own search paths.
+    # A missing `-liomp5` otherwise surfaces at the build step of whichever unit reaches it first.
+    link_report = link_preflight.for_run(d.root, vendor=arm, features=build_features(suite, arm, d),
+                                         loader_paths=d.loader_paths)
+    if link_report is not None:
+        print(link_report["text"], file=sys.stderr)
+        if not link_report["ok"]:
+            sys.exit(f"ERROR: the link preflight failed ({link_preflight.CONFIG}); nothing was built or measured")
     check_cpu_sets(suite)
     cpu_sets, cpu_source = cpu_sets_for(suite, next(p for p in profiles if p["name"] == args.profile),
                                         threads)
@@ -959,6 +969,9 @@ def main(argv=None, root=None):
     name = f"{stamp}-{args.label}" if args.label else stamp
     run_dir = d.data_dir / args.profile / args.suite_id / name
     run_dir.mkdir(parents=True, exist_ok=True)
+    if link_report is not None:
+        # The evidence that the linked libraries were the ones checked, kept with the run.
+        (run_dir / "link-preflight.json").write_text(json.dumps(link_report, indent=2) + "\n")
 
     bin_dir = pathlib.Path(pin[pin_env.get("bin_dir", "BIN_DIR")])
     binary = bin_dir / d.measured["binary"]

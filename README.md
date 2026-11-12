@@ -104,6 +104,54 @@ Three things the first `zen2-cpu` smoke (tensor4all-meta#76, 3.3) had to learn:
   `verify.n` names is refused. A smoke asks for the `verify.n` shapes (tlinalg: `4,8,16`), not
   for one shape.
 
+### The link preflight: a missing library fails in seconds, not at the build
+
+`campaign-link-preflight` (`python3 -m campaign_toolkit.link_preflight`) checks that every
+shared library a campaign links can be **linked** with the build's own search paths and
+**loaded** with the runner's own loader path, before anything is built or measured. It is not
+an `ldconfig` lookup: for each arm of `benchmarks/link-preflight.yaml` it compiles an empty
+`fn main() {}` with the same `rustc`, `RUSTFLAGS` and linker the build uses, the arm's `-L`
+directories and its libraries forced into `DT_NEEDED`, then resolves the result with `ldd`
+and runs it under the arm's `loader_paths` (or its `-rpath`). One arm takes well under a
+second.
+
+```yaml
+arms:
+  mkl:
+    source: harness/build.rs (feature link-mkl)   # the build logic this arm mirrors
+    when: {vendor: mkl}                           # record_run checks it for this arm / feature
+    env:
+      MKLROOT: {required: true, default_glob: "/opt/intel/oneapi/mkl/*"}
+      MKL_THREADING_LIB: {required: true, default_glob: "/opt/intel/oneapi/compiler/*/lib/libiomp5.so"}
+    search: ["$MKLROOT/lib", "dirname:$MKL_THREADING_LIB"]
+    libs: [mkl_intel_lp64, mkl_intel_thread, mkl_core, iomp5]
+    rpath: true
+    fix: {iomp5: "export MKL_THREADING_LIB={path}"}
+```
+
+A failure names the missing soname, every directory searched, where the library actually is
+(when it is somewhere on the host), and the one variable to set; the exit code is 1 (2 for an
+unusable declaration):
+
+```
+  FAIL followup-mwe  [mwe/cpu_followup/build.rs (feature system-mkl)]  (0.041 s)
+       missing:  the linker cannot find libiomp5.so (-liomp5)
+       searched: /opt/intel/oneapi/mkl/2026.2/lib ($MKLROOT/lib); LIBRARY_PATH=(unset); the linker's default directories
+       found:    /opt/intel/oneapi/compiler/2026.2/lib/libiomp5.so
+       fix:      export LIBRARY_PATH=/opt/intel/oneapi/compiler/2026.2/lib${LIBRARY_PATH:+:$LIBRARY_PATH}
+```
+
+`record_run` runs the arms that apply to the run (`when.vendor` = the vendor arm,
+`when.feature` in the build features, or no `when`) before its CPU checks, lock and build,
+refuses the run if one fails, and keeps the report as `link-preflight.json` in the run
+directory. A campaign without the file is unaffected. A periodic refresh runs the whole file
+once per host and profile at its start and keeps `--json`/`--log` with the campaign evidence:
+
+```bash
+campaign-link-preflight --config benchmarks/link-preflight.yaml --profile zen5-cpu \
+    --json evidence/link-preflight.json --log evidence/link-preflight.txt
+```
+
 ## Hardware profiles
 
 A profile is a fact about a machine, not about a campaign, so the library lives
@@ -305,6 +353,7 @@ publishing a numerical page.
 |---|---|
 | `campaign_toolkit/` | the package: the entry points and `descriptor.py`, `campaign.py`, `jsonschema_lite.py`, `declarations.py` |
 | `campaign_toolkit/charts.py`, `figures.py`, `trend.py` | the chart parts, the site's chart hook, and the trend points and chart |
+| `campaign_toolkit/link_preflight.py` | the link preflight: each declared vendor/baseline link line is linked and loaded before a build |
 | `campaign_toolkit/schemas/` | the packaged copies of the schemas, used at runtime and by an installed wheel |
 | `campaign_toolkit/profiles/` | the shared hardware profile library a campaign opts into by name |
 | `schemas/` | the same schemas for review; a test fails if the two copies differ |
