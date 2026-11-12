@@ -9,6 +9,7 @@ campaign.
 import contextlib
 import hashlib
 import io
+import json
 import os
 import pathlib
 import shutil
@@ -122,6 +123,66 @@ class FixtureCampaignTest(unittest.TestCase):
         manifest = campaign.load(runs[-1] / 'run.yaml')
         self.assertIs(manifest['local_commits_allowed'], True)
         self.assertNotIn('pre_release', manifest)
+
+    def _record_patches(self, original, pin, build=None):
+        return (mock.patch.object(record_run, 'build', build or mock.Mock(return_value=pin)),
+                mock.patch.object(record_run, 'boost_state', return_value={}),
+                mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
+                mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+                mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
+                                  original['library']['commit'] if args[0] == 'rev-parse' else ''),
+                mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
+                mock.patch.object(record_run, 'vendor_identity', return_value={'vendor.name': 'openblas'}),
+                mock.patch.object(record_run, 'host_info', return_value=original['host']))
+
+    @unittest.skipUnless(shutil.which('rustc') and shutil.which('cc'), 'the link preflight needs rustc and cc')
+    def test_a_library_that_cannot_link_refuses_the_run_before_the_lock_and_the_build(self):
+        (self.root / 'benchmarks/link-preflight.yaml').write_text(yaml.safe_dump({'arms': {
+            'vendor': {'source': 'fixture', 'search': [], 'libs': ['no_such_library_for_the_fixture']}}}))
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        build = mock.Mock()
+        err = io.StringIO()
+        with contextlib.ExitStack() as stack, contextlib.redirect_stderr(err):
+            for patch in self._record_patches(original, {}, build):
+                stack.enter_context(patch)
+            with self.assertRaises(SystemExit) as raised:
+                record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1', '--label', 'probe',
+                                 '--allow-local-commits'], root=self.root)
+        self.assertIn('link preflight failed', str(raised.exception.code))
+        self.assertIn('the linker cannot find libno_such_library_for_the_fixture.so', err.getvalue())
+        build.assert_not_called()
+        self.assertFalse((self.root / 'target/campaign.lock').exists(), 'refused before the lock')
+
+    def test_the_link_preflight_report_is_kept_with_the_run(self):
+        (self.root / 'benchmarks/link-preflight.yaml').write_text(yaml.safe_dump({'arms': {
+            'vendor': {'source': 'fixture', 'search': [], 'libs': ['c']}}}))
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+
+        def process(args, **kwargs):
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            elif 'campaign_toolkit.report_run' in args:
+                directory = pathlib.Path(args[args.index('--run-dir') + 1])
+                (directory / 'report.md').write_text('probe\n')
+            return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
+
+        child = mock.Mock(return_value=subprocess.CompletedProcess([], 0, stdout='', stderr=''))
+        with contextlib.ExitStack() as stack:
+            for patch in self._record_patches(original, pin):
+                stack.enter_context(patch)
+            stack.enter_context(mock.patch.object(record_run.subprocess, 'run', side_effect=process))
+            stack.enter_context(mock.patch('campaign_toolkit.link_preflight.shutil.which', return_value='/usr/bin/true'))
+            stack.enter_context(mock.patch.object(descriptor, 'run_module', child))
+            code = record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1', '--label', 'probe',
+                                    '--allow-local-commits'], root=self.root)
+        self.assertEqual(code, 0)
+        runs = sorted((self.root / RUN_A_REL).parent.glob('*-probe'))
+        report = json.loads((runs[-1] / 'link-preflight.json').read_text())
+        self.assertTrue(report['ok'])
+        self.assertEqual([arm['arm'] for arm in report['arms']], ['vendor'])
 
     def test_pre_release_is_rejected_for_publication_but_valid_for_comparison(self):
         path = self.root / RUN_A_REL / 'run.yaml'
