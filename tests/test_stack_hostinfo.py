@@ -254,7 +254,7 @@ class StackFilesTest(unittest.TestCase):
         self.assertEqual(libs["t4a-faer"]["version"], "0.28.0")
         self.assertIsNone(libs["t4a-faer"]["tag"])
         self.assertTrue(commits["tlinalg"].startswith("53d1f0d"))
-        self.assertTrue(commits["tcontract"].startswith("ebf0e50"))
+        self.assertTrue(commits["tcontract"].startswith("a045446"))
         self.assertIsNone(libs["tcontract"]["version"])
         self.assertIsNone(libs["tcontract"]["tag"])
         self.assertTrue(commits["tcontract-v1"].startswith("0df08df"))

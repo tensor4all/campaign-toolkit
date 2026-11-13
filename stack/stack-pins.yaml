@@ -53,8 +53,8 @@ libraries:
     crate: tcontract
     version: null
     tag: null
-    commit: ebf0e50bc5b26c727eaf22213bd41900c17872c8
-    note: "tcontract-rs main at the qcbench harness merge (tensor4all/tcontract-rs#187): the harness is in no release yet - v0.12.0 (abf8c72) predates it - so the campaign measures this main head until a release contains it"
+    commit: a045446301442ebb7540c806d9914dccce62357a
+    note: "tcontract-rs main at the qcbench vendor-pool fix (tensor4all/tcontract-rs#191, merge a045446): neither the qcbench harness (#187) nor the fix is in a release yet - v0.12.0 (abf8c72) predates both - so the campaign measures this main head until one contains them"
   tcontract-v1:
     repo: https://github.com/tensor4all/tcontract-rs
     crate: tcontract
@@ -119,7 +119,7 @@ repositories:
         library: tcontract
         field: commit
         measured: 9f793ede6b8076fd7ce2251594a9552ad66aa339
-        note: "the timing-v2 pages (tcbench and per-shape, zen5-cpu, 2026-10-31) were measured at v0.9.0 (9f793ed); the qcbench target ebf0e50 has no publication yet. The pin moves with the publication that measures it"
+        note: "the timing-v2 pages (tcbench and per-shape, zen5-cpu, 2026-10-31) were measured at v0.9.0 (9f793ed); the qcbench target a045446 has no publication yet. The pin moves with the publication that measures it"
       - {kind: rev-file, file: pins/tcontract-rs.rev, library: tcontract-v1, field: commit}
     run_dirs: [data/results/*/*/*, data/v2-results/*/*/*/*]
   - name: cpueinsum-benchmark
