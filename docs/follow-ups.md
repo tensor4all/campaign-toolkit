@@ -40,8 +40,8 @@ improvements, 0 regressions) but **43 beyond-band regressions at 4T/8T, all smal
 `qr_factor 32x32` f64 at 1.83x). The change is merged; the follow-up is the guard.
 
 - Tracked as **tensor4all/faer#18**.
-- Evidence: `faer-benchmark/docs/reviews/20261016-acceptance-run.md` (the "next step" line), the run
-  dirs it cites, and `faer-benchmark/docs/rules.md` for the acceptance protocol to re-run afterwards.
+- Evidence: `colmat-benchmark/docs/reviews/20261016-acceptance-run.md` (the "next step" line), the run
+  dirs it cites, and `colmat-benchmark/docs/rules.md` for the acceptance protocol to re-run afterwards.
 - Next: add the shape threshold (or route small shapes to the previous path), then re-accept.
 
 ## 4. tlinalg: an optional further trim

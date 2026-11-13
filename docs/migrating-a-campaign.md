@@ -1,13 +1,13 @@
 # Migrating an existing campaign onto the toolkit (and starting a new one)
 
 Survey of the sibling campaigns on 2026-10-16, and the steps that bring each of them onto the same
-timing-v2 system as `faer-benchmark`. Written so a fresh session can execute it without re-surveying.
+timing-v2 system as `colmat-benchmark` (named `faer-benchmark` until 2026-11-13). Written so a fresh session can execute it without re-surveying.
 
 ## Where the sibling campaigns are today
 
 | campaign | harness | scripts | toolkit | newest page |
 | --- | --- | --- | --- | --- |
-| `faer-benchmark` | `fbench` **in the campaign**, links both libraries by path | thin shims over `campaign_toolkit` | pinned in `requirements.txt` | 2026-10-16, timing v2 |
+| `colmat-benchmark` | `fbench` **in the campaign**, links both libraries by path | thin shims over `campaign_toolkit` | pinned in `requirements.txt` | 2026-10-16, timing v2 |
 | `tlinalg-benchmark` | `tlbench` **in the measured repo** (`tlinalg-rs/crates/tlinalg-bench`), vendor chosen with `BENCH_VENDOR` | its own copies of `record_run.py`, `report_run.py`, `validate_run.py`, `gen_index.py`, `compare_runs.py`, `publish_report.py`, `campaign.py` | none (`requirements.txt` = jsonschema, pyyaml) | 2026-10-11, v1 |
 | `tcontract-benchmark` | same shape (`build_for_tprims_rev.sh`, harness in `tcontract-rs`) | same copied scripts, smaller set | none | 2026-10-09, v1 |
 | `cpueinsum-rs` | none yet | none | none | none |
@@ -44,14 +44,14 @@ the same shape the guide's last section describes for `tlbench`.
 
 ## Steps per campaign
 
-1. **Descriptor** `benchmarks/campaign.yaml` (model: `faer-benchmark`): `measured` (name, url, pin file,
+1. **Descriptor** `benchmarks/campaign.yaml` (model: `colmat-benchmark`): `measured` (name, url, pin file,
    extern dir, build script, binary, features or build env, `build_argv`, `pin_env`, `protocol`),
    `identities`, `profiles_file`, `suites_dir`, `data_dir`, `result_dir`, `engines`, `vendor_providers`,
    `external_providers` (a separately built baseline, when the campaign records one),
    `vendor_env`, `csv_columns`, `case_axes`/`case_label`, `page_name` (add `{timing}`), `report`,
    `default_invalidated_by`, `timing: {version: 2}`.
 2. **Shims**: replace each copied script with a three-line shim over the toolkit, as
-   `faer-benchmark/scripts/*.py` does (`from campaign_toolkit.record_run import main`), and keep the
+   `colmat-benchmark/scripts/*.py` does (`from campaign_toolkit.record_run import main`), and keep the
    campaign's own `benchmarks/scripts/{pinned.sh,idle_cpus.py}` (the toolkit looks for the protocol in
    the measured checkout or the campaign through `descriptor.measured.protocol`).
 3. **Pin** the toolkit in `requirements.txt`
@@ -95,7 +95,7 @@ files, so the suite declaration should be generated from them and committed, not
   affinity is checked, so a new session only has to launch the recorder pinned off the measured domain
   (`taskset -c <free cpus>`) and the toolkit refuses when it is not.
 - `host.power` records boost/governor/EPP; the recorder refuses to measure with boost on.
-- Every campaign's `AGENTS.md` points at its `docs/rules.md` equivalent, and `faer-benchmark/docs/rules.md`
+- Every campaign's `AGENTS.md` points at its `docs/rules.md` equivalent, and `colmat-benchmark/docs/rules.md`
   is the model for the runbook text.
 
 ## The harness side: what the timing-v2 contract requires of the measured repo
@@ -108,7 +108,7 @@ but the *harness* must speak the v2 CLI or the recorder stops at its first verif
 usage: tlbench info | verify --threads N --n LIST [--batch LIST] [--dtype LIST] [--family LIST]
 ```
 
-That is the v1 surface. The v2 contract adds, and `faer-benchmark/fbench` is the reference
+That is the v1 surface. The v2 contract adds, and `colmat-benchmark/fbench` is the reference
 implementation of all of it:
 
 | what | v1 (as found) | v2 contract |
