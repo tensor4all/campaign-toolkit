@@ -169,9 +169,9 @@ class MeasuredHoldTest(unittest.TestCase):
         stack = stackmod.load()
         held = {u["file"]: u["measured"] for r in stack["repositories"] for u in r["consumes"]
                 if "measured" in u}
-        self.assertEqual(held, {
-            "pins/tcontract-rs-v2.rev": "9f793ede6b8076fd7ce2251594a9552ad66aa339",
-        })
+        # No shipped hold: every pinned campaign has a publication at the
+        # stack's commit (the three v2 campaigns were recorded at a045446).
+        self.assertEqual(held, {})
 
 
 if __name__ == "__main__":
