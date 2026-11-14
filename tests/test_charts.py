@@ -102,6 +102,15 @@ class LogAxisTest(unittest.TestCase):
         self.assertGreater(len(minor_lines(svg, 'y')), 0)
         self.assertEqual(len(minor_lines(svg, 'y')) % (3 * 2), 0)
 
+    def test_a_five_digit_y_tick_clears_the_axis_label(self):
+        # qcbench reaches 10000 ms; the old fixed 104 px margin put the tick under the
+        # rotated y-axis label, which raises instead of dropping (the label is not a tick).
+        panel = charts.xy_panel('t', {'label': 'threads', 'range': (1, 8)},
+                                {'label': 'median time (ms)', 'range': (100, 90000)}, [])
+        svg = ''.join(panel(charts.Layout(), (0, 0, 560, 440)))
+        self.assertIn('10000', svg)
+        self.assertIn('median time (ms)', svg)
+
     def test_a_dot_plot_axis_carries_minor_ticks(self):
         values = {('1T', 'a', 'e'): (0.5, 0.01), ('1T', 'b', 'e'): (40.0, 1.0)}
         svg, _ = charts.dot_plot('t', ['a', 'b'], ['e'], values, ['1T'])

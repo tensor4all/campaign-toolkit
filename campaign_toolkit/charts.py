@@ -125,6 +125,18 @@ def tick_text(value):
     return f'{value:g}'
 
 
+def labelled_ticks(lo, hi):
+    """The tick values a log axis writes: its majors, widened to the 2x/5x minors and then to
+    every minor while fewer than two majors fall inside the range."""
+    major, minor = log_ticks(lo, hi)
+    labelled = list(major)
+    if len(labelled) < 2:
+        labelled += [v for v in minor if round(v / 10 ** math.floor(math.log10(v))) in (2, 5)]
+    if len(labelled) < 2:
+        labelled += [v for v in minor if v not in labelled]
+    return labelled
+
+
 def log_axis(layout, axis, lo, hi, plot, panel, font=FONT['tick']):
     """Gridlines, short ticks and labels of one log axis over the plot area `plot`.
 
@@ -152,11 +164,7 @@ def log_axis(layout, axis, lo, hi, plot, panel, font=FONT['tick']):
         else:
             out.append(f'<line x1="{x0}" y1="{p:.1f}" x2="{x0 + width}" y2="{p:.1f}" stroke="{colour}"{attrs}/>')
             out.append(f'<line x1="{x0 - tick}" y1="{p:.1f}" x2="{x0}" y2="{p:.1f}" stroke="#888888"{attrs}/>')
-    labelled = list(major)
-    if len(labelled) < 2:
-        labelled += [v for v in minor if round(v / 10 ** math.floor(math.log10(v))) in (2, 5)]
-    if len(labelled) < 2:
-        labelled += [v for v in minor if v not in labelled]
+    labelled = labelled_ticks(lo, hi)
     for value in labelled:
         p = pos(value)
         if axis == 'x':
@@ -284,9 +292,14 @@ def xy_panel(title, x_axis, y_axis, series):
         bottom = 80
         if categories is not None:
             bottom = 34 + 0.62 * FONT['tick'] * max((len(c) for c in categories), default=1) + 34
-        plot = (x + 104, y + 24 + FONT['panel'], w - 104 - 18, h - 24 - FONT['panel'] - bottom)
-        out = panel_frame(layout, rect, title)
         y_lo, y_hi = y_axis['range']
+        # The left margin holds the rotated y-axis label and the widest tick label. A 5-digit
+        # tick (10000 ms) is wider than the 4-digit ones the original fixed 104 px assumed.
+        label_right = 12 + FONT['axis'] * 0.9 + FONT['axis'] * 0.25
+        tick_w = 0.62 * FONT['tick'] * max((len(tick_text(v)) for v in labelled_ticks(y_lo, y_hi)), default=1)
+        left = max(104, math.ceil(label_right + 4 + 12 + tick_w))
+        plot = (x + left, y + 24 + FONT['panel'], w - left - 18, h - 24 - FONT['panel'] - bottom)
+        out = panel_frame(layout, rect, title)
         y_parts, ypos = log_axis(layout, 'y', y_lo, y_hi, plot, rect)
         out += y_parts
         px, py, pw, ph = plot
