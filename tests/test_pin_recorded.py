@@ -170,7 +170,6 @@ class MeasuredHoldTest(unittest.TestCase):
         held = {u["file"]: u["measured"] for r in stack["repositories"] for u in r["consumes"]
                 if "measured" in u}
         self.assertEqual(held, {
-            "pins/t4a-faer.rev": "71b25ffb7ae3ce038ec25b35c91e526be41b9a63",
             "pins/tcontract-rs-v2.rev": "9f793ede6b8076fd7ce2251594a9552ad66aa339",
         })
 
