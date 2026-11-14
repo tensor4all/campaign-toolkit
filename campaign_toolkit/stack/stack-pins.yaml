@@ -104,8 +104,8 @@ repositories:
         file: pins/t4a-faer.rev
         library: t4a-faer
         field: commit
-        measured: 71b25ffb7ae3ce038ec25b35c91e526be41b9a63
-        note: "the four published 0.28.0-cycle recordings (zen5-cpu, faer-kernels and faer-kernels-large, MKL and OpenBLAS, 2026-11-01) were measured at 71b25ffb, the parent of the 0.28.0 crates.io source 325e482; the two differ only in Cargo.lock and faer/Cargo.toml (threadteam 0.2.0 measured, 0.3.0 shipped). The pin moves to 325e482 with the publication that measures it"
+        # The 2026-11-13 publication records both suites and both vendors at 325e482;
+        # the pin now follows that measured release revision.
       - {kind: rev-file, file: pins/upstream-faer.rev, library: faer-upstream, field: tag}
     run_dirs: [data/results/*/*/*]
   - name: tlinalg-benchmark
