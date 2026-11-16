@@ -21,7 +21,7 @@
 #
 # State: published t4a-faer 0.28.0, the other releases of 2026-10-30, tenferro-rs main
 # (untagged, after v0.8.1), tensor4all-rs main, whose own git dependency stays on
-# tenferro v0.8.0, and tcontract-rs main (untagged, at the qcbench harness merge, which is
+# tenferro v0.8.0, and tcontract-rs main (untagged, at the zqcbench harness merge, which is
 # in no release). Every declared tag and crates.io source commit is checked with
 # `python -m campaign_toolkit.stack --remote`; t4a-faer 0.28.0, tenferro-rs main and
 # tcontract-rs main have no remote tag.
@@ -53,8 +53,8 @@ libraries:
     crate: tcontract
     version: null
     tag: null
-    commit: a045446301442ebb7540c806d9914dccce62357a
-    note: "tcontract-rs main at the qcbench vendor-pool fix (tensor4all/tcontract-rs#191, merge a045446): neither the qcbench harness (#187) nor the fix is in a release yet - v0.12.0 (abf8c72) predates both - so the campaign measures this main head until one contains them"
+    commit: 807183f57ce77622f0af197b8c4fa3dced9a84c5
+    note: "tcontract-rs main at the zqcbench harness merge (tensor4all/tcontract-rs#199, merge 807183f): the qcbench and zqcbench harnesses are in no release yet - v0.12.0 (abf8c72) predates them - so the campaign measures this main head until a release contains them"
   tcontract-v1:
     repo: https://github.com/tensor4all/tcontract-rs
     crate: tcontract
@@ -118,7 +118,8 @@ repositories:
         file: pins/tcontract-rs-v2.rev
         library: tcontract
         field: commit
-        note: "the timing-v2 pages (tcbench, per-shape and qcbench) were measured at a045446 (#191) on epyc-9575f, 2026-11-14; the zen5-cpu pages at 9f793ed are history"
+        measured: a045446301442ebb7540c806d9914dccce62357a
+        note: "the timing-v2 pages (tcbench, per-shape and qcbench) were measured at a045446 (#191) on epyc-9575f, 2026-11-14; the zqcbench target 807183f has no publication yet. The pin moves with the publication that measures it; the zen5-cpu pages at 9f793ed are history"
       - {kind: rev-file, file: pins/tcontract-rs.rev, library: tcontract-v1, field: commit}
     run_dirs: [data/results/*/*/*, data/v2-results/*/*/*/*]
   - name: cpueinsum-benchmark
