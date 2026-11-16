@@ -169,9 +169,11 @@ class MeasuredHoldTest(unittest.TestCase):
         stack = stackmod.load()
         held = {u["file"]: u["measured"] for r in stack["repositories"] for u in r["consumes"]
                 if "measured" in u}
-        # No shipped hold: every pinned campaign has a publication at the
-        # stack's commit (the three v2 campaigns were recorded at a045446).
-        self.assertEqual(held, {})
+        # The qcbench pages were measured at a045446; the zqcbench target
+        # 807183f has no publication yet, so the pin is held at a045446.
+        self.assertEqual(held, {
+            "pins/tcontract-rs-v2.rev": "a045446301442ebb7540c806d9914dccce62357a",
+        })
 
 
 if __name__ == "__main__":
