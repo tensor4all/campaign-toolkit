@@ -250,9 +250,9 @@ class StackFilesTest(unittest.TestCase):
     def test_every_commit_is_a_full_sha_and_the_known_pins_are_present(self):
         libs = stackmod.load()["libraries"]
         commits = {k: v["commit"] for k, v in libs.items()}
-        self.assertEqual(commits["t4a-faer"], "325e482b6532624d06236ad6991a41c57b0c23d1")
-        self.assertEqual(libs["t4a-faer"]["version"], "0.28.0")
-        self.assertIsNone(libs["t4a-faer"]["tag"])
+        self.assertEqual(commits["colmat"], "93da62172a96260ae3d5ed7481690f440f58d904")
+        self.assertIsNone(libs["colmat"]["version"])   # main is in no release; the source is unnamed by a tag
+        self.assertIsNone(libs["colmat"]["tag"])
         self.assertTrue(commits["tlinalg"].startswith("53d1f0d"))
         self.assertTrue(commits["tcontract"].startswith("807183f"))
         self.assertIsNone(libs["tcontract"]["version"])

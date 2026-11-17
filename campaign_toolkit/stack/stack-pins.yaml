@@ -19,22 +19,22 @@
 # `campaign_toolkit/stack/stack-pins.yaml` is the packaged copy that an installed toolkit
 # reads; a test fails if the two differ. Edit this one and copy it over.
 #
-# State: published t4a-faer 0.28.0, the other releases of 2026-10-30, tenferro-rs main
-# (untagged, after v0.8.1), tensor4all-rs main, whose own git dependency stays on
-# tenferro v0.8.0, and tcontract-rs main (untagged, at the zqcbench harness merge, which is
-# in no release). Every declared tag and crates.io source commit is checked with
-# `python -m campaign_toolkit.stack --remote`; t4a-faer 0.28.0, tenferro-rs main and
+# State: colmat-rs main (untagged, the 2026-11-17 pre-optimization baseline), the releases of
+# 2026-10-30, tenferro-rs main (untagged, after v0.8.1), tensor4all-rs main, whose own git
+# dependency stays on tenferro v0.8.0, and tcontract-rs main (untagged, at the zqcbench harness
+# merge, which is in no release). Every declared tag and crates.io source commit is checked with
+# `python -m campaign_toolkit.stack --remote`; colmat-rs main, tenferro-rs main and
 # tcontract-rs main have no remote tag.
 schema_version: 1
 
 libraries:
-  t4a-faer:
-    repo: https://github.com/tensor4all/faer
-    crate: t4a-faer
-    version: "0.28.0"
+  colmat:
+    repo: https://github.com/tensor4all/colmat-rs
+    crate: colmat
+    version: null
     tag: null
-    commit: 325e482b6532624d06236ad6991a41c57b0c23d1
-    note: "published crates.io source for t4a-faer 0.28.0 (faer#182); the faer campaign separately discloses its predecessor measurement and threadteam 0.2.0/0.3.0 limitation"
+    commit: 93da62172a96260ae3d5ed7481690f440f58d904
+    note: "colmat-rs main at the 2026-11-17 head (merge of #218): the pre-optimization baseline, which carries the post-0.34.0 correctness and perf merges #197-#220 that are in no release yet. No `colmat` git tag exists; the published 0.34.0 source is e1c83482 (crates.io .cargo_vcs_info.json) if the released source is wanted instead. The previous library entry was `t4a-faer` 0.28.0 (325e482), the crate name before the 2026-11-12 rename."
   faer-upstream:
     repo: https://codeberg.org/sarah-quinones/faer
     crate: faer
@@ -102,10 +102,14 @@ repositories:
     consumes:
       - kind: rev-file
         file: pins/t4a-faer.rev
-        library: t4a-faer
+        library: colmat
         field: commit
-        # The 2026-11-13 publication records both suites and both vendors at 325e482;
-        # the pin now follows that measured release revision.
+        # The 2026-11-13 publication records both suites and both vendors at 325e482
+        # (t4a-faer 0.28.0); the colmat 0.34.0 baseline publication moves the pin to 93da6217
+        # in the same change, and the hold is dropped then. The pin file keeps its historical
+        # name: renaming it is a cross-repo path change with no measurement value.
+        measured: 325e482b6532624d06236ad6991a41c57b0c23d1
+        note: "held at the last measured revision until the colmat 0.34.0 baseline publication lands; dropped in that publication's change"
       - {kind: rev-file, file: pins/upstream-faer.rev, library: faer-upstream, field: tag}
     run_dirs: [data/results/*/*/*]
   - name: tlinalg-benchmark
