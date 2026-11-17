@@ -171,13 +171,11 @@ class MeasuredHoldTest(unittest.TestCase):
                 if "measured" in u}
         # The qcbench pages were measured at a045446; the zqcbench target
         # 807183f has no publication yet, so the pin is held at a045446.
-        # tenferro-benchmark's 2026-11-17 pages were measured at 9a850b06; the
-        # 0.12 target ce9125d0 has no publication yet, so the pin is held
-        # there (tenferro-benchmark#490).
+        # tenferro-benchmark's 2026-11-17 A100 routine set published at the 0.12
+        # target, so its hold was dropped (tenferro-benchmark#491).
         self.assertEqual(held, {
             "pins/t4a-faer.rev": "325e482b6532624d06236ad6991a41c57b0c23d1",
             "pins/tcontract-rs-v2.rev": "a045446301442ebb7540c806d9914dccce62357a",
-            "pins/tenferro-rs.rev": "9a850b06155405acc99ecd0648829e9e6d3866ba",
         })
 
 
