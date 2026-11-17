@@ -122,8 +122,7 @@ repositories:
         file: pins/tcontract-rs-v2.rev
         library: tcontract
         field: commit
-        measured: a045446301442ebb7540c806d9914dccce62357a
-        note: "the timing-v2 pages (tcbench, per-shape and qcbench) were measured at a045446 (#191) on epyc-9575f, 2026-11-14; the zqcbench target 807183f has no publication yet. The pin moves with the publication that measures it; the zen5-cpu pages at 9f793ed are history"
+        note: "the timing-v2 pages (tcbench, per-shape, qcbench and zqcbench) were measured at 807183f on epyc-9575f, 2026-11-17 (skx TBLIS); the a045446 and zen5-cpu pages are history"
       - {kind: rev-file, file: pins/tcontract-rs.rev, library: tcontract-v1, field: commit}
     run_dirs: [data/results/*/*/*, data/v2-results/*/*/*/*]
   - name: cpueinsum-benchmark
