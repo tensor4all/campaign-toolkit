@@ -260,7 +260,7 @@ class StackFilesTest(unittest.TestCase):
         self.assertTrue(commits["tcontract-v1"].startswith("0df08df"))
         self.assertTrue(commits["cpueinsum"].startswith("124aa12"))
         self.assertTrue(commits["einsum-corpus"].startswith("753c0b3"))
-        self.assertTrue(commits["tenferro"].startswith("9a850b0"))
+        self.assertTrue(commits["tenferro"].startswith("ce9125d"))
         self.assertIsNone(libs["tenferro"]["version"])
         self.assertIsNone(libs["tenferro"]["tag"])
         self.assertTrue(commits["tensor4all-rs"].startswith("12f14b9"))
@@ -376,11 +376,24 @@ class SyncPinsTest(unittest.TestCase):
     def test_tenferro_pin_file_is_written_and_checked(self):
         tenferro = self.tmp / "tenferro-benchmark"
         commit = self.stack["libraries"]["tenferro"]["commit"]
+        use = next(u for r in self.stack["repositories"] if r["name"] == "tenferro-benchmark"
+                   for u in r["consumes"] if u["library"] == "tenferro")
+        # The shipped stack holds tenferro-benchmark at the revision its pages were
+        # measured at until a publication measures the target, so the written pin is
+        # the hold, not the library's commit.
+        want = use.get("measured") or commit
         write(tenferro, "pins/tenferro-rs.rev", "# measured revision\n" + "2" * 40 + "\n")
         self.assertEqual(sync_pins.main([str(tenferro), "--check"], out=io.StringIO()), 1)
-        self.assertEqual(sync_pins.main([str(tenferro)], out=io.StringIO()), 0)
-        self.assertEqual((tenferro / "pins/tenferro-rs.rev").read_text(), f"# measured revision\n{commit}\n")
+        out = io.StringIO()
+        self.assertEqual(sync_pins.main([str(tenferro)], out=out), 0)
+        self.assertEqual((tenferro / "pins/tenferro-rs.rev").read_text(), f"# measured revision\n{want}\n")
         self.assertEqual(sync_pins.main([str(tenferro), "--check"], out=io.StringIO()), 0)
+        if "measured" in use:
+            self.assertNotEqual(want, commit)
+            # --check reports the hold beside the pin; the write line names it too.
+            check_out = io.StringIO()
+            self.assertEqual(sync_pins.main([str(tenferro), "--check"], out=check_out), 0)
+            self.assertIn("held at the measured revision", check_out.getvalue())
 
     def test_workflow_and_cargo_pins_are_checked_not_written(self):
         # No shipped repository carries a workflow pin today, so the kind is checked
