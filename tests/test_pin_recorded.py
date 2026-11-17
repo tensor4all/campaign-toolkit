@@ -169,13 +169,11 @@ class MeasuredHoldTest(unittest.TestCase):
         stack = stackmod.load()
         held = {u["file"]: u["measured"] for r in stack["repositories"] for u in r["consumes"]
                 if "measured" in u}
-        # The qcbench pages were measured at a045446; the zqcbench target
-        # 807183f has no publication yet, so the pin is held at a045446.
-        # tenferro-benchmark's 2026-11-17 A100 routine set published at the 0.12
-        # target, so its hold was dropped (tenferro-benchmark#491).
+        # No tcontract hold: the four v2 campaigns (tcbench, per-shape,
+        # qcbench, zqcbench) were recorded at 807183f on epyc-9575f on
+        # 2026-11-17. The colmat hold stays at its last measured release.
         self.assertEqual(held, {
             "pins/t4a-faer.rev": "325e482b6532624d06236ad6991a41c57b0c23d1",
-            "pins/tcontract-rs-v2.rev": "a045446301442ebb7540c806d9914dccce62357a",
         })
 
 
