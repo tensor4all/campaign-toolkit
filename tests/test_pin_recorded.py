@@ -172,6 +172,7 @@ class MeasuredHoldTest(unittest.TestCase):
         # The qcbench pages were measured at a045446; the zqcbench target
         # 807183f has no publication yet, so the pin is held at a045446.
         self.assertEqual(held, {
+            "pins/t4a-faer.rev": "325e482b6532624d06236ad6991a41c57b0c23d1",
             "pins/tcontract-rs-v2.rev": "a045446301442ebb7540c806d9914dccce62357a",
         })
 
