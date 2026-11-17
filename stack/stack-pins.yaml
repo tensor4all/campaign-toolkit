@@ -80,8 +80,8 @@ libraries:
     crate: tenferro-runtime
     version: null
     tag: null
-    commit: 9a850b06155405acc99ecd0648829e9e6d3866ba
-    note: "tenferro-rs main after tenferro-rs#2439 (traced values are owned by a TraceContext; the context-free TracedTensor constructors are gone) and #2490 (an external payload's view request answers None); tenferro-benchmark#364 builds against it, so the weekly GPU build is green again; tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
+    commit: ce9125d0cff4ee40841120759b5df45252c27f22
+    note: "tenferro-rs main at the 0.12.0 tree (version 0.12.0 is not published: crates.io tenferro-runtime stops at 0.11.0 and 35bc49d5 says nothing is tagged). 0.12 removed the vendor BLAS/LAPACK CPU providers (#2608) and replaced the per-receiver extension traits with the one call grammar (#2552); tenferro-benchmark#490 migrates the harness. tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
   tensor4all-rs:
     repo: https://github.com/tensor4all/tensor4all-rs
     crate: tensor4all-core
@@ -133,7 +133,15 @@ repositories:
     run_dirs: [data/v2-results/*/*/*/*]
   - name: tenferro-benchmark
     consumes:
-      - {kind: rev-file, file: pins/tenferro-rs.rev, library: tenferro, field: commit}
+      - kind: rev-file
+        file: pins/tenferro-rs.rev
+        library: tenferro
+        field: commit
+        # The 2026-11-17 pages were measured at 9a850b06; tenferro-benchmark#490 is
+        # the migration that builds and measures at the 0.12 target, and the pin
+        # moves in the change that publishes a recording at ce9125d0.
+        measured: 9a850b06155405acc99ecd0648829e9e6d3866ba
+        note: "held at the last measured revision until a publication is measured at the 0.12 target (ce9125d0); dropped in that publication's change"
     run_dirs: [data/results/*/*/*/*]
   - name: tensor4all-benchmark
     consumes:
