@@ -137,11 +137,9 @@ repositories:
         file: pins/tenferro-rs.rev
         library: tenferro
         field: commit
-        # The 2026-11-17 pages were measured at 9a850b06; tenferro-benchmark#490 is
-        # the migration that builds and measures at the 0.12 target, and the pin
-        # moves in the change that publishes a recording at ce9125d0.
-        measured: 9a850b06155405acc99ecd0648829e9e6d3866ba
-        note: "held at the last measured revision until a publication is measured at the 0.12 target (ce9125d0); dropped in that publication's change"
+        # The 2026-11-17 A100 routine set published at ce9125d0
+        # (tenferro-benchmark#491), so the hold is dropped and the pin moves
+        # with that publication.
     run_dirs: [data/results/*/*/*/*]
   - name: tensor4all-benchmark
     consumes:
