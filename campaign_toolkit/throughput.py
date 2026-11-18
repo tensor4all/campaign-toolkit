@@ -20,6 +20,9 @@ import yaml
 from . import charts
 
 
+PLOTTABLE_NOTES = frozenset({"", "api-inclusive"})
+
+
 def load_run(run_dir, dtype='f64', order='c'):
     """{(threads, family, size, note, engine): {repeat: median ms}} for square, ok rows."""
     run_dir = Path(run_dir)
@@ -42,7 +45,7 @@ def points(cells, threads, family, engine, coefficient, complex_dtype=False):
     """[(n, nominal GFLOP/s, between-start sample SD)] for one series in one panel."""
     out = []
     for (t, f, size, note, row), medians in sorted(cells.items()):
-        if t != threads or f != family or row != engine:
+        if t != threads or f != family or row != engine or note not in PLOTTABLE_NOTES:
             continue
         values = [ms for ms in medians.values() if ms > 0]
         if len(values) < 2:
