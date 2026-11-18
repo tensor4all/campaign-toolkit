@@ -104,12 +104,10 @@ repositories:
         file: pins/t4a-faer.rev
         library: colmat
         field: commit
-        # The 2026-11-13 publication records both suites and both vendors at 325e482
-        # (t4a-faer 0.28.0); the colmat 0.34.0 baseline publication moves the pin to 93da6217
-        # in the same change, and the hold is dropped then. The pin file keeps its historical
-        # name: renaming it is a cross-repo path change with no measurement value.
-        measured: 325e482b6532624d06236ad6991a41c57b0c23d1
-        note: "held at the last measured revision until the colmat 0.34.0 baseline publication lands; dropped in that publication's change"
+        # The 2026-11-17 baseline publication records the daily suite on both vendor arms and the
+        # large suite on MKL at 93da6217 (colmat-rs main), so the pin follows the measured revision.
+        # The pin file keeps its historical name: renaming it is a cross-repo path change with no
+        # measurement value.
       - {kind: rev-file, file: pins/upstream-faer.rev, library: faer-upstream, field: tag}
     run_dirs: [data/results/*/*/*]
   - name: tlinalg-benchmark
