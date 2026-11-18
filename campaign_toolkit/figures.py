@@ -64,6 +64,7 @@ def throughput_figures(spec, runs, out_dir):
     config = yaml.safe_load(d.resolve(spec['config']).read_text())
     version = config.get('version', 'v1')
     out = []
+    orders = tuple(config.get('orders') or ('c',))
     for profile, group in by_profile(runs).items():
         run_dirs = []
         for want in spec['runs']:
@@ -72,13 +73,16 @@ def throughput_figures(spec, runs, out_dir):
             run_dirs.append(match[-1] if match else None)
         if not any(run_dirs):
             continue
-        target = out_dir / 'throughput' / profile
-        written, _ = throughput.write_report(run_dirs, config, target,
-                                             budgets=tuple(config.get('budgets', (1, 4, 8))))
-        out += [dict(kind='throughput', title=f'{profile} {family}: nominal GFLOP/s vs n',
-                     svg=target / f'throughput-{family}-{version}.svg',
-                     data=target / f'throughput-{family}-{version}.md')
-                for family in written]
+        for order in orders:
+            target = out_dir / 'throughput' / profile / (order if len(orders) > 1 else '')
+            written, _ = throughput.write_report(run_dirs, config, target,
+                                                 budgets=tuple(config.get('budgets', (1, 4, 8))),
+                                                 order=order)
+            out += [dict(kind='throughput',
+                         title=f'{profile} {family} ({order.upper()} order): nominal GFLOP/s vs n',
+                         svg=target / f'throughput-{family}-{version}.svg',
+                         data=target / f'throughput-{family}-{version}.md')
+                    for family in written]
     return out
 
 
