@@ -20,6 +20,18 @@ class PointsTest(unittest.TestCase):
         self.assertAlmostEqual(cplx, 4 * real, places=6)
 
 
+class RenderFamilyLabelTest(unittest.TestCase):
+    def test_a_series_label_replaces_the_engine_name_in_the_legend_and_the_points_still_load(self):
+        cells = {(1, 'gemm', 32, '', 'faer-fork'): {'run0': 1.0, 'run1': 1.1},
+                 (1, 'gemm', 64, '', 'faer-fork'): {'run0': 0.9, 'run1': 0.9}}
+        series = [{'engine': 'faer-fork', 'label': 'colmat', 'colour': '#1f77b4', 'run': [0]}]
+        svg, _dropped = throughput.render_family('gemm', {'coefficient': 2.0}, series,
+                                                 {'faer-fork': cells}, [1])
+        self.assertIn('colmat', svg)
+        self.assertNotIn('faer-fork', svg)
+        self.assertIn('<polyline points=', svg)   # the labeled series' points are plotted
+
+
 class RevisionsLineTest(unittest.TestCase):
     def test_names_role_vendor_and_revisions_and_the_missing_run(self):
         import tempfile

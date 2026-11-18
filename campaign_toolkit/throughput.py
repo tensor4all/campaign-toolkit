@@ -65,12 +65,14 @@ def render_family(family, family_spec, series, cells_by_engine, budgets, dtype='
     data = [p for per_engine in blocks.values() for pts in per_engine.values() for p in pts]
     x_range = charts.log_range([p[0] for p in data]) if data else (10.0, 100.0)
     y_range = charts.log_range([max(p[1], 1e-6) for p in data]) if data else (1.0, 10.0)
-    entries = [dict(label=spec['engine'], colour=spec['colour'], marker=spec.get('marker', 'circle'),
+    entries = [dict(label=spec.get('label', spec['engine']), colour=spec['colour'], marker=spec.get('marker', 'circle'),
                     dash=spec.get('dash'), width=spec.get('width', 1.6), size=spec.get('size', 3.5))
                for spec in series]
     panels = [charts.xy_panel(f'{threads}T', {'label': 'n (matrix size)', 'range': x_range},
                               {'label': 'nominal GFLOP/s', 'range': y_range},
-                              [dict(entry, points=blocks[threads][entry['label']]) for entry in entries])
+                              # `blocks` is keyed by the engine row, not the display label
+                              [dict(entry, points=blocks[threads][spec['engine']])
+                               for entry, spec in zip(entries, series)])
               for threads in budgets]
     return charts.figure(f'{family}: nominal GFLOP/s vs n', entries, panels)
 
