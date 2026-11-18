@@ -13,6 +13,12 @@ class PointsTest(unittest.TestCase):
         self.assertAlmostEqual(gflops, 2.0 * 32 ** 3 / (1.05 * 1e6), places=6)
         self.assertGreater(err, 0)
 
+    def test_api_inclusive_rows_are_plotted_and_variant_notes_are_skipped(self):
+        cells = {(1, 'gemm', 32, 'api-inclusive', 'lapack-mkl'): {'run0': 1.0, 'run1': 1.0},
+                 (1, 'gemm', 64, 'variant-a', 'lapack-mkl'): {'run0': 1.0, 'run1': 1.0}}
+        out = throughput.points(cells, 1, 'gemm', 'lapack-mkl', coefficient=2.0)
+        self.assertEqual([size for size, _, _ in out], [32])
+
     def test_c64_counts_four_times_the_real_operations(self):
         cells = {(1, 'gemm', 32, '', 'faer-fork'): {'run0': 1.0, 'run1': 1.0}}
         real = throughput.points(cells, 1, 'gemm', 'faer-fork', coefficient=2.0, complex_dtype=False)[0][1]
