@@ -87,9 +87,15 @@ def render_family(family, family_spec, series, cells_by_engine, budgets, dtype='
     return charts.figure(f'{family}: nominal GFLOP/s vs n', entries, panels)
 
 
+def ops_label(family_spec, dtype):
+    """The nominal count a table or page prints, a complex dtype qualified: `4 x 2n^3`."""
+    label = family_spec['label']
+    return f'4 x {label} (a complex element counts four times the real operations)' if dtype == 'c64' else label
+
+
 def data_markdown(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):
     lines = [f'# {family} - plotted data (nominal GFLOP/s)', '',
-             f'Nominal operation count: `{family_spec["label"]}`. Each value is the median of the process',
+             f'Nominal operation count: `{ops_label(family_spec, dtype)}`. Each value is the median of the process',
              'medians for that cell, `+-` is the between-start sample SD, a dot means that row is not',
              'measured in that arm, and the chart of the same name holds the same numbers.', '']
     for threads in budgets:
@@ -132,11 +138,13 @@ def revisions_line(run_dirs, labels=None):
     return line
 
 
-def page_markdown(config, families, budgets, dtype='f64', revisions=None):
+def page_markdown(config, families, budgets, dtype='f64', order='c', revisions=None):
     """The page that links the charts: a table of contents, then one section per family."""
     page = config.get('page', {})
     version = config.get('version', 'v1')
-    lines = [f'# {page.get("title", "Throughput charts")}', '']
+    # One README per dataset names its dataset, so four variants are four distinguishable pages
+    # instead of four copies of the same title.
+    lines = [f'# {page.get("title", "Throughput charts")} ({dtype}, {order.upper()} order)', '']
     lines += [line for line in page.get('notes', [])]
     if revisions:
         lines.append(revisions)
@@ -145,12 +153,12 @@ def page_markdown(config, families, budgets, dtype='f64', revisions=None):
     for family in families:
         spec = config['families'][family]
         lines.append(f'| [{family}](throughput-{family}-{version}.svg) '
-                     f'([data](throughput-{family}-{version}.md)) | `{spec["label"]}` |')
+                     f'([data](throughput-{family}-{version}.md)) | `{ops_label(spec, dtype)}` |')
     lines.append('')
     for family in families:
         lines += [f'## {family}', '', f'![{family}](throughput-{family}-{version}.svg)', '',
                   f'Plotted numbers: [throughput-{family}-{version}.md](throughput-{family}-{version}.md). '
-                  f'Nominal operation count `{config["families"][family]["label"]}`.', '']
+                  f'Nominal operation count `{ops_label(config["families"][family], dtype)}`.', '']
     return '\n'.join(lines) + '\n'
 
 
@@ -180,6 +188,6 @@ def write_report(run_dirs, config, out_dir, budgets=(1, 4, 8), dtype='f64', orde
             data_markdown(family, family_spec, config['series'], cells_by_series, budgets, dtype))
         written.append(family)
     (out_dir / 'README.md').write_text(page_markdown(
-        config, written, budgets, dtype,
+        config, written, budgets, dtype, order,
         revisions_line(run_dirs, config.get('page', {}).get('run_labels'))))
     return written, dropped

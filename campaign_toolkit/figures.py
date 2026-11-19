@@ -5,7 +5,9 @@ site, so a chart can never drift from the runs it claims to show. The descriptor
 charts a campaign has:
 
 * `figures.throughput`: size-against-throughput charts (`throughput`), the chart config plus the
-  (suite, vendor arm) whose current page's run fills each run position the config names;
+  (suite, vendor arm) whose current page's run fills each run position the config names; the
+  config's `variants` (or the legacy `orders`, at `f64`) say which `(dtype, order)` datasets
+  each get their own chart set, filed under `throughput/<profile>/<dtype>-<order>/`;
 * `figures.cases`: suites whose current pages each get a case dot plot (`charts.dot_plot`),
   for suites whose cases are not a size sweep;
 * `trend`: the representative cases followed across pins (`trend`), drawn once by pin and once
@@ -64,7 +66,10 @@ def throughput_figures(spec, runs, out_dir):
     config = yaml.safe_load(d.resolve(spec['config']).read_text())
     version = config.get('version', 'v1')
     out = []
-    orders = tuple(config.get('orders') or ('c',))
+    # `variants` (a list of {dtype, order}) is the declared axis; `orders` is the form the
+    # config had before the dtype axis existed, and it stays one f64 variant per order.
+    variants = config.get('variants') or [dict(dtype='f64', order=order)
+                                           for order in config.get('orders') or ('c',)]
     for profile, group in by_profile(runs).items():
         run_dirs = []
         for want in spec['runs']:
@@ -73,13 +78,18 @@ def throughput_figures(spec, runs, out_dir):
             run_dirs.append(match[-1] if match else None)
         if not any(run_dirs):
             continue
-        for order in orders:
-            target = out_dir / 'throughput' / profile / (order if len(orders) > 1 else '')
+        # The runs behind the charts, in the config's own words, once per profile: the pages a
+        # campaign builds from these entries state it beside the charts (`write_report` prints
+        # the same line into each set's README, one owner for the wording).
+        revisions = throughput.revisions_line(run_dirs, config.get('page', {}).get('run_labels'))
+        for variant in variants:
+            dtype, order = variant.get('dtype', 'f64'), variant['order']
+            target = out_dir / 'throughput' / profile / (f'{dtype}-{order}' if len(variants) > 1 else '')
             written, _ = throughput.write_report(run_dirs, config, target,
                                                  budgets=tuple(config.get('budgets', (1, 4, 8))),
-                                                 order=order)
-            out += [dict(kind='throughput',
-                         title=f'{profile} {family} ({order.upper()} order): nominal GFLOP/s vs n',
+                                                 dtype=dtype, order=order)
+            out += [dict(kind='throughput', dtype=dtype, order=order, revisions=revisions,
+                         title=f'{profile} {family} ({dtype}, {order.upper()} order): nominal GFLOP/s vs n',
                          svg=target / f'throughput-{family}-{version}.svg',
                          data=target / f'throughput-{family}-{version}.md')
                     for family in written]
