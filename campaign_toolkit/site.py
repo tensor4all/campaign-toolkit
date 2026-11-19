@@ -434,9 +434,36 @@ def chart_grid(site_root, charts, blob, repo_ref, root=None):
             f'<div class="charts">{"".join(items)}</div>')
 
 
+def write_page(site_root, name, title, body):
+    """`<site_root>/<name>`: one page the campaign itself composes, in the site's own frame.
+
+    `write_site` owns the landing page and the HTML copies of the recorded pages; this is the
+    frame for everything else a campaign builds at deploy time (one chart page per dataset,
+    say), so such a page needs no second stylesheet and links back like every other page.
+    `body` is the campaign's own HTML; the nav back and the `<h1>` heading are here.
+    """
+    out = pathlib.Path(site_root) / name
+    out.write_text(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}</title>
+<style>{CSS}</style></head><body>
+<nav><a href="index.html">current results</a> &middot;
+<a href="history.html">history</a></nav>
+<h1>{html.escape(title)}</h1>
+{body}
+</body></html>
+""")
+    return out
+
+
 def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extra_html='',
-               root=None):
-    """Write `<site_root>/index.html`, `history.html` and an HTML copy of every result page."""
+               root=None, charts=None):
+    """Write `<site_root>/index.html`, `history.html` and an HTML copy of every result page.
+
+    `charts` is for a caller that already generated the figure entries (`figures.site_figures`)
+    and wants to show exactly those on the landing page -- because it moved some of them onto
+    pages of their own (`write_page`), say. When it is omitted the landing page generates them
+    here, or shows the charts committed under the site root when the campaign declares none.
+    """
     site_root = pathlib.Path(site_root).resolve()
     given = pathlib.Path(root).resolve() if root else site_root
     root = given
@@ -504,8 +531,10 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
 
     # The charts are generated here, from the runs behind the current pages, when the campaign
     # declares them; otherwise the throughput charts committed under the site root are shown.
-    generated = figures.site_figures(campaign_root(given), site_root, current) if campaign_root(given) else None
-    charts = _charts(site_root) if generated is None else generated
+    # A caller that generated them itself (`charts=`) has already done this pass.
+    if charts is None:
+        generated = figures.site_figures(campaign_root(given), site_root, current) if campaign_root(given) else None
+        charts = _charts(site_root) if generated is None else generated
     intro = intro or ('The results at the pinned revisions, one section per hardware profile. Each page '
                       'is shown here as HTML; its Markdown source is linked beside it.')
     history = write_history(root, site_root, heading, older)

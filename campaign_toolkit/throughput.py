@@ -125,11 +125,13 @@ def revisions_line(run_dirs, labels=None):
     return line
 
 
-def page_markdown(config, families, budgets, dtype='f64', revisions=None):
+def page_markdown(config, families, budgets, dtype='f64', order='c', revisions=None):
     """The page that links the charts: a table of contents, then one section per family."""
     page = config.get('page', {})
     version = config.get('version', 'v1')
-    lines = [f'# {page.get("title", "Throughput charts")}', '']
+    # One README per dataset names its dataset, so four variants are four distinguishable pages
+    # instead of four copies of the same title.
+    lines = [f'# {page.get("title", "Throughput charts")} ({dtype}, {order.upper()} order)', '']
     lines += [line for line in page.get('notes', [])]
     if revisions:
         lines.append(revisions)
@@ -173,6 +175,6 @@ def write_report(run_dirs, config, out_dir, budgets=(1, 4, 8), dtype='f64', orde
             data_markdown(family, family_spec, config['series'], cells_by_series, budgets, dtype))
         written.append(family)
     (out_dir / 'README.md').write_text(page_markdown(
-        config, written, budgets, dtype,
+        config, written, budgets, dtype, order,
         revisions_line(run_dirs, config.get('page', {}).get('run_labels'))))
     return written, dropped
