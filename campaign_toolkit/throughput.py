@@ -43,17 +43,24 @@ def load_run(run_dir, dtype='f64', order='c'):
 
 def points(cells, threads, family, engine, coefficient, complex_dtype=False):
     """[(n, nominal GFLOP/s, between-start sample SD)] for one series in one panel."""
-    out = []
+    # One point per size. A run can carry the same cell under `note=""` and
+    # `note="api-inclusive"` (the daily and large-tier runs, or two call
+    # modes), and plotting both makes a vertical stack at one x. Prefer the
+    # plain row; the api-inclusive row is the fallback for vendor rows only.
+    chosen = {}
     for (t, f, size, note, row), medians in sorted(cells.items()):
         if t != threads or f != family or row != engine or note not in PLOTTABLE_NOTES:
             continue
         values = [ms for ms in medians.values() if ms > 0]
         if len(values) < 2:
             continue
+        if size in chosen and chosen[size][3] == "":
+            continue
         ms = statistics.median(values)
         gflops = coefficient * (4 if complex_dtype else 1) * size ** 3 / (ms * 1e6)
-        out.append((size, gflops, gflops * statistics.stdev(values) / ms))
-    return out
+        chosen[size] = (size, gflops, gflops * statistics.stdev(values) / ms, note)
+    return [(size, gflops, err) for size, gflops, err, _note in
+            (chosen[size] for size in sorted(chosen))]
 
 
 def render_family(family, family_spec, series, cells_by_engine, budgets, dtype='f64'):
