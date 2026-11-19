@@ -57,8 +57,6 @@ class RevisionsLineTest(unittest.TestCase):
         self.assertIn('No run was given for large openblas', line)
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 class ThroughputFiguresVariantsTest(unittest.TestCase):
     """`figures.site_figures` writes one chart set per declared (dtype, order) variant, each
@@ -171,3 +169,5 @@ class ThroughputFiguresVariantsTest(unittest.TestCase):
             self.assertIn('(f64, F order)', found[0]['title'])
             self.assertTrue((root / 'result' / 'figures' / 'throughput' / 'p' /
                              'throughput-gemm-v9.svg').is_file())
+if __name__ == '__main__':
+    unittest.main()
