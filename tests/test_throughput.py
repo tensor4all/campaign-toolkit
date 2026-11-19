@@ -92,14 +92,15 @@ class ThroughputFiguresVariantsTest(unittest.TestCase):
         (root / 'benchmarks' / 'campaign.yaml').write_text(yaml.safe_dump(self.CAMPAIGN))
         (root / 'benchmarks' / 'throughput.yaml').write_text(yaml.safe_dump(config))
         # One recorded run: gemm at n = 32 and 64, both repeats, every (dtype, order) cell.
-        # The c64 samples are three times the f64 ones, so a chart set that quietly plotted the
-        # f64 cells under a c64 name is distinguishable from a correctly generated one.
+        # The c64 samples are three times the f64 ones and the c-order samples are twice the
+        # f-order ones, so a chart set that quietly plotted another dataset's cells (a dropped
+        # dtype or order filter) is distinguishable from a correctly generated one.
         lines = ['status,dtype,order,m,n,threads,family,note,row,samples_ms\n']
         for dtype, scale in (('f64', 1.0), ('c64', 3.0)):
-            for order in ('f', 'c'):
+            for order, order_scale in (('f', 1.0), ('c', 2.0)):
                 for n in (32, 64):
                     lines.append(f'ok,{dtype},{order},{n},{n},1,gemm,,faer-fork,'
-                                 f'"[{scale * 1.0}, {scale * 1.2}]"\n')
+                                 f'"[{scale * order_scale * 1.0}, {scale * order_scale * 1.2}]"\n')
         for repeat in ('run0', 'run1'):
             (run / f'{repeat}-gemm-1t.csv').write_text(''.join(lines))
         (run / 'run.yaml').write_text(yaml.safe_dump({
@@ -139,6 +140,13 @@ class ThroughputFiguresVariantsTest(unittest.TestCase):
             value = float(re.search(r'\| 64 \| ([0-9.e+-]+) ', table).group(1))
             expected = 2.0 * 4 * 64 ** 3 / (statistics.median([3.0, 3.6]) * 1e6)
             self.assertAlmostEqual(value / expected, 1.0, places=2)
+            # The order axis must select cells too: the c-order c64 samples are twice the
+            # f-order ones. Dropping the order filter in `load_run` mixes them, so this value
+            # would then be computed from median([6.0, 7.2]) and fail.
+            table_c = (per_variant / 'c64-c' / 'throughput-gemm-v9.md').read_text()
+            value_c = float(re.search(r'\| 64 \| ([0-9.e+-]+) ', table_c).group(1))
+            expected_c = 2.0 * 4 * 64 ** 3 / (statistics.median([6.0, 7.2]) * 1e6)
+            self.assertAlmostEqual(value_c / expected_c, 1.0, places=2)
             # The same x4 must reach the drawn chart, not only the table: the renderer has to
             # ask `points` for the complex count when it draws a c64 chart. An auto-scaled log
             # axis hides a dropped multiplier (every value shifts by the same factor), so the
