@@ -281,8 +281,9 @@ campaign that splits its charts onto pages of their own (one page per dataset, s
 them once with `figures.site_figures`, writes those pages with `site.write_page` and passes
 the entries it still wants inline to `write_site(charts=...)`.
 Throughput chart sets are one per `(dtype, order)` the chart config declares (`variants:`, or
-the legacy `orders:` at `f64`), filed under `figures/throughput/<profile>/<dtype>-<order>/`,
-and each set's entry names its dataset in its `title`.
+the legacy `orders:` at `f64`), filed under `figures/throughput/<profile>/<dtype>-<order>/`
+(a single declared variant keeps the profile directory flat, as before), and each set's entry
+names its dataset in its `title` and carries the runs behind it in `revisions`.
 Every chart is drawn by `campaign_toolkit.charts`: log axes always carry minor ticks (2..9 times
 each decade), panels sit side by side (three to a row), the legend sits above the panels, and
 every tick and legend label is at least 12 px when the chart is shown 72rem wide (a test checks

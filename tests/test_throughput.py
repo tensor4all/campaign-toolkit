@@ -1,6 +1,7 @@
 import pathlib
 import statistics
 import unittest
+from unittest import mock
 
 from campaign_toolkit import throughput
 
@@ -126,6 +127,7 @@ class ThroughputFiguresVariantsTest(unittest.TestCase):
                              [('f64', 'f'), ('f64', 'c'), ('c64', 'f'), ('c64', 'c')])
             for f in found:
                 self.assertIn(f"({f['dtype']}, {f['order'].upper()} order)", f['title'])
+                self.assertIn('daily mkl', f['revisions'])   # the runs behind the charts
             # One directory per variant, and the README of each set names its dataset.
             per_variant = root / 'result' / 'figures' / 'throughput' / 'p'
             self.assertEqual(sorted(p.name for p in per_variant.iterdir()),
@@ -139,6 +141,23 @@ class ThroughputFiguresVariantsTest(unittest.TestCase):
             value = float(re.search(r'\| 64 \| ([0-9.e+-]+) ', table).group(1))
             expected = 2.0 * 4 * 64 ** 3 / (statistics.median([3.0, 3.6]) * 1e6)
             self.assertAlmostEqual(value / expected, 1.0, places=2)
+            # The same x4 must reach the drawn chart, not only the table: the renderer has to
+            # ask `points` for the complex count when it draws a c64 chart. An auto-scaled log
+            # axis hides a dropped multiplier (every value shifts by the same factor), so the
+            # contract is asserted at the call the renderer makes.
+            cells = throughput.load_run(root / 'data' / 'results' / 'run', dtype='c64', order='f')
+            asked = []
+            real_points = throughput.points
+
+            def spy(*args, **kwargs):
+                asked.append(kwargs.get('complex_dtype'))
+                return real_points(*args, **kwargs)
+
+            with mock.patch.object(throughput, 'points', side_effect=spy):
+                svg, _ = throughput.render_family('gemm', self.FAMILIES['gemm'], self.SERIES,
+                                                  {'faer-fork': cells}, [1], 'c64')
+            self.assertEqual(asked, [True])
+            self.assertIn('<polyline points=', svg)   # the complex-scaled points are plotted
 
     def test_the_orders_form_stays_one_f64_chart_set_in_a_flat_directory(self):
         import tempfile
