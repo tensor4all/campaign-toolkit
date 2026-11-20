@@ -691,6 +691,26 @@ class FixtureCampaignTest(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
                     record_run.require_observer_off_measured_cpus({'1': '4'})
 
+    def test_a_declared_unobserved_row_warns_instead_of_refusing(self):
+        # An SMT-off node measured whole has no CPU outside the measured domains. Only a profile that
+        # declares `observer: ""` for that row relaxes the refusal; an undeclared row keeps it.
+        online = set(range(8))
+        profile = {'thread_rows': [{'threads': 8, 'measured': '0-7', 'observer': ''},
+                                   {'threads': 4, 'measured': '0-3', 'observer': '4-7'}]}
+        with (mock.patch.object(record_run, 'l3_domain', side_effect=lambda cpu: {0, 1, 2, 3} if cpu < 4 else {4, 5, 6, 7}),
+              mock.patch.object(record_run, 'online_cpus', return_value=online),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value=online, create=True)):
+            self.assertEqual(record_run.unobserved_rows(profile, {'8': '0-7'}), ['8'])
+            self.assertEqual(record_run.unobserved_rows(profile, {'4': '0-3'}), [])
+            self.assertEqual(record_run.unobserved_rows({'thread_rows': [{'threads': 8, 'measured': '0-7', 'observer': '0'}]},
+                                                        {'8': '0-7'}), [])
+            with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+                record_run.require_observer_off_measured_cpus({'8': '0-7'}, unobserved=['8'])
+                self.assertIn('observer unavailable', err.getvalue())
+            with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
+                record_run.require_observer_off_measured_cpus({'8': '0-7'})   # undeclared: refused
+            self.assertIn('observer unavailable', record_run.observer_affinity({'8': '0-7'})['caveat'])
+
     def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
             with mock.patch('sys.stderr', new_callable=io.StringIO) as quiet:
