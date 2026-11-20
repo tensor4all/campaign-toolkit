@@ -214,3 +214,21 @@ class TimingEvidenceTest(unittest.TestCase):
         manifest['run_spec']['populations'][0]['n'].append('4')
         with self.assertRaisesRegex(ValueError, 'declared run grid'):
             self.validate(manifest)
+
+
+class UnverifiedCellsTest(unittest.TestCase):
+    def test_a_narrowed_verify_carries_the_variant_rows_of_the_checked_shape(self):
+        from campaign_toolkit import timing_evidence as te
+        def key(family, n, row, note=''):
+            return ('r', family, 'f64', 'f', n, n, '', '1', row, '16') + (note,)
+        census = {key('lu', '4096', 'faer-fork'): 'ok', key('lu', '4096', 'faer-fork', 'api-inclusive'): 'ok',
+                  key('lu', '4096', 'lapack-openblas'): 'ok'}
+        declared = [key('lu', n, row)[:-1] for n in ('4096', '8192') for row in ('faer-fork', 'lapack-openblas')]
+        got = te.unverified_cells(census, declared)
+        self.assertIn(key('lu', '8192', 'faer-fork', 'api-inclusive'), got)
+        self.assertIn(key('lu', '8192', 'faer-fork'), got)
+        self.assertIn(key('lu', '8192', 'lapack-openblas'), got)
+        self.assertNotIn(key('lu', '8192', 'lapack-openblas', 'api-inclusive'), got)
+        # a cell with no checked sibling keeps the empty note
+        self.assertEqual(te.unverified_cells({}, [key('qr', '8192', 'faer-fork')[:-1]]),
+                         {key('qr', '8192', 'faer-fork')})
