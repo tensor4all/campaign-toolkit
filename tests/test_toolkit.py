@@ -46,6 +46,16 @@ def git(cwd, *args, **env):
                           capture_output=True, text=True).stdout.strip()
 
 
+def _walk(node):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield k, v
+            yield from _walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _walk(v)
+
+
 class FixtureCampaignTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -710,6 +720,9 @@ class FixtureCampaignTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
                 record_run.require_observer_off_measured_cpus({'8': '0-7'})   # undeclared: refused
             self.assertIn('observer unavailable', record_run.observer_affinity({'8': '0-7'})['caveat'])
+            schema = json.loads((descriptor.schemas_dir() / 'benchmark-run.schema.json').read_text())
+            observer = next(v for k, v in _walk(schema) if k == 'observer' and 'free_cpus' in v.get('properties', {}))
+            self.assertIn('caveat', observer['properties'])   # the manifest schema admits what the recorder writes
 
     def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
