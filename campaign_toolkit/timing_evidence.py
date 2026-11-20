@@ -25,6 +25,31 @@ def samples(row, repetitions):
     return values
 
 
+def unverified_cells(census, declared):
+    """Timed cells a narrowed verify never checked, with the notes they will carry.
+
+    A family with separately timed variants (`lu`/`cholesky` with an `api-inclusive` row on a
+    faer engine) emits one timed row per variant at every shape. The census only has the variants
+    of the shapes it checked, so the variants of an unchecked shape are taken from the checked
+    shape of the same (regime, family, dtype, order, batch, row, threads); a cell with no checked
+    sibling carries the empty note. `declared` are base cells (`BASE`), `census` maps full keys
+    (`BASE` plus the note) to their status.
+    """
+    shape = {BASE.index(name) for name in ('m', 'n', 'k')}
+
+    def free(key):
+        return tuple(v for i, v in enumerate(key[:len(BASE)]) if i not in shape)
+
+    notes = {}
+    for key in census:
+        notes.setdefault(free(key), set()).add(key[len(BASE)])
+    out = set()
+    for key in declared:
+        for note in notes.get(free(key)) or {''}:
+            out.add(tuple(key) + (note,))
+    return out
+
+
 def expected_cells(manifest):
     spec = manifest['run_spec']
     expected = set()
@@ -134,7 +159,8 @@ def validate(manifest, run_dir):
             # do not get is a status comparison, because there is no verified status for them.
             # `expected_cells` carries the ten base cells; a census key adds the note, which is
             # empty for a cell that was never checked.
-            here = {key + ('',) for key in expected_cells(manifest) if (key[0], key[9]) == group}
+            here = unverified_cells(census, [key for key in expected_cells(manifest)
+                                             if (key[0], key[9]) == group])
             for key in here - set(expected):
                 expected[key] = 'ok'
         actual = {}

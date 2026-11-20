@@ -118,8 +118,11 @@ def observer_affinity(cpu_sets):
     """
     free_cpus = observer_cpus(cpu_sets)
     mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
-    return {"affinity": format_cpu_list(mine), "free_cpus": format_cpu_list(free_cpus),
-            "source": "os.sched_getaffinity(0) in the recording process"}
+    record = {"affinity": format_cpu_list(mine), "free_cpus": format_cpu_list(free_cpus),
+              "source": "os.sched_getaffinity(0) in the recording process"}
+    if not free_cpus:
+        record["caveat"] = "observer unavailable: no CPU lies outside the measured L3 domains"
+    return record
 
 
 def warn_if_measured_cpus_span_l3_domains(cpu_sets):
@@ -212,8 +215,28 @@ def ancestor_processes(pid=None, seconds=OBSERVER_SAMPLE_SECONDS, sleep=time.sle
     return out
 
 
-def require_observer_off_measured_cpus(cpu_sets):
+def unobserved_rows(profile, cpu_sets):
+    """Thread rows whose profile declares no observer CPU at all (`observer: ""`) and whose measured
+    CPUs cover every online CPU.
+
+    That is the only case where the observer-off-the-domain rule cannot be met by any pin: the
+    machine has no CPU left (an SMT-off node measured whole). It is declared by the profile, never
+    inferred, so an ordinary profile keeps the refusal.
+    """
+    declared = {str(r["threads"]) for r in (profile or {}).get("thread_rows", [])
+                if r.get("observer", None) == ""}
+    online = online_cpus()
+    return sorted(t for t, spec in cpu_sets.items()
+                  if t in declared and online <= set(parse_cpu_list(spec)))
+
+
+def require_observer_off_measured_cpus(cpu_sets, unobserved=()):
     """Refuse to record from a process that may run inside a measured L3 domain.
+
+    `unobserved` lists thread rows the profile declares with no observer CPU, measured on every
+    online CPU. For those rows no pin can exist, so the refusal becomes a recorded warning
+    ("observer unavailable"): the recorder and the driver share the measured cores, and the page
+    must say so.
 
     Keeping unrelated work off the measured cores is an operator precondition, not something the
     idle guard can repair after the fact: this process is the observer, its children inherit its
@@ -230,6 +253,12 @@ def require_observer_off_measured_cpus(cpu_sets):
     free_cpus = observer_cpus(cpu_sets)
     mine = set(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else set()
     shared = sorted(mine & domains)
+    if unobserved and not free_cpus:
+        print(f"warning: observer unavailable for the {', '.join(unobserved)}T row(s): the profile "
+              f"declares no observer CPU and every online CPU is measured, so the recorder and the "
+              f"driver share the measured cores; the residual contention is recorded in the "
+              f"manifest's observer block, not removed", file=sys.stderr)
+        return
     if shared:
         free = ", ".join(f"{low}" if high == low else f"{low}-{high}"
                          for low, high in ranges(sorted(free_cpus)))
@@ -903,7 +932,8 @@ def main(argv=None, root=None):
     print(f"cpu sets from {cpu_source}: "
           + ", ".join(f"{t}T {c}" for t, c in cpu_sets.items()), file=sys.stderr)
     warn_if_measured_cpus_span_l3_domains(cpu_sets)
-    require_observer_off_measured_cpus(cpu_sets)
+    require_observer_off_measured_cpus(
+        cpu_sets, unobserved_rows(next(p for p in profiles if p["name"] == args.profile), cpu_sets))
     require_quiet_observing_side(cpu_sets)
     observer_record = observer_affinity(cpu_sets)
     require_boost_disabled()
