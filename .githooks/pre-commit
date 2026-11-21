@@ -16,7 +16,9 @@ root=$(git rev-parse --show-toplevel)
 
 # 1. a measurement holds target/campaign.lock
 lock="$root/target/campaign.lock"
-if [ -e "$lock" ] && ! flock -n "$lock" true 2>/dev/null; then
+# fcntl rather than flock(1), which macOS does not ship: without it every commit after a run
+# would be refused while no measurement holds the lock.
+if [ -e "$lock" ] && ! python3 -c 'import fcntl, sys; fcntl.flock(open(sys.argv[1]), fcntl.LOCK_EX | fcntl.LOCK_NB)' "$lock" 2>/dev/null; then
     echo "pre-commit: a campaign measurement holds target/campaign.lock." >&2
     echo "pre-commit: commit after it finishes; changing the tree mid-run refuses the run." >&2
     exit 1

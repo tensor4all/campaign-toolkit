@@ -1,0 +1,19 @@
+# A hardware profile: a machine (or a well-defined container on one) whose cells
+# are only comparable with each other. See zen5-cpu.yaml for what a profile is.
+# The aarch64 host of the cpueinsum route-fit campaign (cpueinsum-benchmark#18). It is the
+# toolkit's first unpinned profile: `pinned: false` is a property of the operating system, not
+# a setting, so it is declared here rather than discovered per run.
+role: measurement
+name: apple-m4max
+pinned: false
+description: >-
+  Apple M4 Max, 16 cores (12 performance cores in two clusters of 6, 4 efficiency cores), no
+  SMT, macOS. UNPINNED AND PARTIAL: macOS has no CPU affinity interface, so the measured
+  process cannot be placed on chosen cores and the scheduler decides between performance
+  and efficiency cores; there is no sysfs, so there is no idle gate, no observer split, and
+  no boost/governor/NUMA state to record. A run records `threads.pinned: false` and its CPU
+  sets as `unpinned`. Its cells are comparable only with other runs of this profile, never
+  with a pinned profile's.
+cpu: Apple M4 Max
+logical_cpus: 16
+l3: "no L3: 16 MiB L2 per 6-core performance cluster, 4 MiB L2 for the 4 efficiency cores (sysctl hw.perflevel*.l2cachesize)"

@@ -77,6 +77,11 @@ def l3_domain(cpu):
     return sysfs_cpu_list(pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/cache/index3/shared_cpu_list")) or {cpu}
 
 
+def can_pin():
+    """Whether this host has the affinity interface every pinned check reads (Linux; not macOS)."""
+    return hasattr(os, "sched_getaffinity")
+
+
 def online_cpus():
     return sysfs_cpu_list(pathlib.Path("/sys/devices/system/cpu/online")) or set(os.sched_getaffinity(0))
 
@@ -507,7 +512,10 @@ def require_numa_recorded(profile):
 
 def host_info(profile_name, profiles):
     profile = next(p for p in profiles if p["name"] == profile_name)
-    lscpu = subprocess.run(["lscpu"], capture_output=True, text=True).stdout
+    try:
+        lscpu = subprocess.run(["lscpu"], capture_output=True, text=True).stdout
+    except OSError:  # no lscpu off Linux; the counts below fall back to what the OS reports
+        lscpu = ""
     logical = next((int(line.split(":")[1].strip()) for line in lscpu.splitlines()
                     if line.startswith("CPU(s):")), 0)
     l3 = next((line.split(":", 1)[1].strip() for line in lscpu.splitlines()
@@ -523,7 +531,7 @@ def host_info(profile_name, profiles):
         "cpu": profile["cpu"],
         "os": f"{platform.system()} {platform.release()}",
         "arch": platform.machine(),
-        "logical_cpus": logical or profile["logical_cpus"],
+        "logical_cpus": logical or os.cpu_count() or profile["logical_cpus"],
         "l3": l3 or profile.get("l3"),
         "l3_domains": profile.get("l3"),
         "notes": profile.get("description"),
@@ -898,16 +906,26 @@ def main(argv=None, root=None):
         if not link_report["ok"]:
             sys.exit(f"ERROR: the link preflight failed ({link_preflight.CONFIG}); nothing was built or measured")
     check_cpu_sets(suite)
-    cpu_sets, cpu_source = cpu_sets_for(suite, next(p for p in profiles if p["name"] == args.profile),
-                                        threads)
+    profile = next(p for p in profiles if p["name"] == args.profile)
+    is_pinned = profile.get("pinned", True)
+    if is_pinned and not can_pin():
+        sys.exit(f"ERROR: profile {args.profile!r} is pinned, but this host has no CPU affinity "
+                 f"interface (no os.sched_getaffinity, {platform.system()}); a run here cannot be "
+                 f"pinned, so record it under a profile that declares `pinned: false`")
+    cpu_sets, cpu_source = cpu_sets_for(suite, profile, threads)
     print(f"cpu sets from {cpu_source}: "
           + ", ".join(f"{t}T {c}" for t, c in cpu_sets.items()), file=sys.stderr)
-    warn_if_measured_cpus_span_l3_domains(cpu_sets)
-    require_observer_off_measured_cpus(cpu_sets)
-    require_quiet_observing_side(cpu_sets)
-    observer_record = observer_affinity(cpu_sets)
+    observer_record = None
+    if is_pinned:
+        warn_if_measured_cpus_span_l3_domains(cpu_sets)
+        require_observer_off_measured_cpus(cpu_sets)
+        require_quiet_observing_side(cpu_sets)
+        observer_record = observer_affinity(cpu_sets)
+    else:
+        print(f"warning: profile {args.profile!r} is unpinned: no CPU affinity, observer split or "
+              f"idle gate applies, and the manifest records threads.pinned: false", file=sys.stderr)
     require_boost_disabled()
-    require_numa_recorded(next(p for p in profiles if p["name"] == args.profile))
+    require_numa_recorded(profile)
     if args.reps < 1 or args.aa < 1 or args.prime_ms < 1:
         sys.exit('ERROR: repetitions, process sets and priming must be positive')
     toolkit = None
@@ -1179,7 +1197,8 @@ def main(argv=None, root=None):
         "threads": {
             "counts": threads,
             "cpu_sets": cpu_sets,
-            "observer": observer_record,
+            "pinned": is_pinned,
+            **({"observer": observer_record} if observer_record else {}),
             "env": {k: os.environ.get(k) for k in d.vendor_env},
             "note": "the vendor's budget is set by the harness from the row's thread count and "
                     "read back before each measurement; these variables were removed from the "
@@ -1196,11 +1215,13 @@ def main(argv=None, root=None):
                       "priming is time-based, not a call count: after an idle gate this host "
                       "reads low for the first second or two of sustained work"),
         },
+        # Off a pinned profile the protocol script runs the command unpinned and ungated, so no
+        # idle policy is recorded as if it had applied.
         "guards": {
-            "idle_window_seconds": int(os.environ.get("PINNED_IDLE_SECONDS", 3)),
-            "max_busy_percent": round(float(os.environ.get("PINNED_MAX_BUSY", 0.05)) * 100, 3),
-            "attempts": int(os.environ.get("PINNED_RETRIES", 3)),
-            "sibling_aware": True,
+            **({"idle_window_seconds": int(os.environ.get("PINNED_IDLE_SECONDS", 3)),
+                "max_busy_percent": round(float(os.environ.get("PINNED_MAX_BUSY", 0.05)) * 100, 3),
+                "attempts": int(os.environ.get("PINNED_RETRIES", 3))} if is_pinned else {}),
+            "sibling_aware": True if is_pinned else None,
             "logs": sorted(set(guards)),
         },
         "providers": providers_for(engines, identity,

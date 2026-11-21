@@ -153,6 +153,10 @@ class Descriptor:
     def profile_names(self) -> list:
         return [p["name"] for p in self.profiles()]
 
+    def unpinned_profiles(self) -> set:
+        """Profiles declaring `pinned: false`: their cells are never compared with a pinned one's."""
+        return {p["name"] for p in self.profiles() if p.get("pinned") is False}
+
     @property
     def suites_dir(self) -> pathlib.Path:
         return self.resolve(self.data["suites_dir"])

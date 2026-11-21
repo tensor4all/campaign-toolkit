@@ -457,6 +457,10 @@
             "type": "string"
           }
         },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether the measured process was pinned to `cpu_sets`. False on a profile declaring `pinned: false`: the CPU sets are then `unpinned`, no observer split or idle gate applied, and the run is not comparable with a pinned profile's. Absent from manifests recorded before this field existed, which were all pinned."
+        },
         "observer": {
           "type": "object",
           "required": [

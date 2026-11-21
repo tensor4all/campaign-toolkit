@@ -204,6 +204,9 @@ def validate(path, check_git=True, allow_pre_release=False):
     profile = next((p for p in descriptor.current().profiles() if p["name"] == manifest["target_profile"]), {})
     if profile.get("record_numa") and not manifest["host"].get("numa"):
         errors.append(f"host.numa: profile {profile['name']!r} requires the NUMA layout to be recorded")
+    if profile and (profile.get("pinned") is not False) != (manifest["threads"].get("pinned") is not False):
+        errors.append(f"threads.pinned: profile {profile['name']!r} declares pinned: "
+                      f"{str(profile.get('pinned', True)).lower()}, and the manifest says otherwise")
 
     suite_file, suite = find_suite(manifest["suite_id"])
     if suite is None:
