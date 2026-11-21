@@ -844,7 +844,11 @@ class FixtureCampaignTest(unittest.TestCase):
             self.assertIn(away.pid, named, "a process allowed on a measured core was not reported")
             self.assertEqual(named[away.pid]['allowed'], str(measured))
             self.assertNotIn(home.pid, named, "a process confined to the observing side was reported")
-            self.assertEqual(foreign, [], "our own children were reported as another user's")
+            # A shared host may have another user's busy process on a measured core;
+            # what must not happen is our own children being reported as foreign.
+            foreign_pids = {entry["pid"] for entry in foreign}
+            self.assertNotIn(away.pid, foreign_pids, "our child was reported as another user's")
+            self.assertNotIn(home.pid, foreign_pids, "our child was reported as another user's")
         finally:
             for child in (away, home):
                 child.kill()
