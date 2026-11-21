@@ -40,6 +40,9 @@ def check_profile(profile) -> list:
     smt = profile.get("smt") or {"threads_per_core": 1, "sibling_offset": profile["logical_cpus"]}
     offset, everything = smt["sibling_offset"], set(range(profile["logical_cpus"]))
     problems = []
+    if profile.get("pinned") is False and profile.get("thread_rows"):
+        problems.append(f"profile {name}: declares pinned: false and thread_rows; an unpinned "
+                        f"host has no CPUs to place a row on")
     for row in profile.get("thread_rows", []):
         measured, observer = cpu_set(row["measured"]), cpu_set(row["observer"])
         where = f"profile {name}: {row['threads']}T row"

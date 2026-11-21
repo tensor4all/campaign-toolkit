@@ -374,7 +374,8 @@ def campaign_view(root, site_root):
     for cell in current:
         if cell['profile'] not in seen:
             seen.append(cell['profile'])
-    return dict(profiles=seen, current=current, history=history, dual=d.has_upstream)
+    return dict(profiles=seen, current=current, history=history, dual=d.has_upstream,
+                unpinned=d.unpinned_profiles())
 
 
 def render_page(page, site_root, root, blob, repo_ref, title):
@@ -496,7 +497,9 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
             shown += len(items)
             sections.append(
                 f'<h2 id="{html.escape(profile)}">{html.escape(profile)}</h2>\n'
-                f'<p class="summary">{profile_summary(rows, view["dual"])}</p>\n'
+                + ('<p class="summary"><strong>Unpinned profile</strong>: not comparable with the '
+                   'pinned profiles above or below.</p>\n' if profile in view['unpinned'] else '')
+                + f'<p class="summary">{profile_summary(rows, view["dual"])}</p>\n'
                 + (f'<ul>{"".join(items)}</ul>\n' if items else '')
                 + (f'<p class="muted">{html.escape(_missing_line(missing))}</p>\n' if missing else ''))
         for r in view['history']:

@@ -26,6 +26,10 @@
         "measurement"
       ]
     },
+    "pinned": {
+      "type": "boolean",
+      "description": "False for a host that cannot pin a measured process to CPUs (no affinity interface, e.g. macOS). Such a profile declares no `thread_rows`; its runs record `threads.pinned: false` and `unpinned` CPU sets, and are never compared with a pinned profile's. Absent means pinned."
+    },
     "smt": {
       "type": "object",
       "required": [

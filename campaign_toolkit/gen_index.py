@@ -419,8 +419,9 @@ def render(pages, declared, references, generated, resolved=None):
         TABLE_HEADER.format(revision=revision_label),
         TABLE_RULE,
     ]
+    unpinned = d.unpinned_profiles()
     for cell in current:
-        mark = "" if cell["required"] else " (optional)"
+        mark = ("" if cell["required"] else " (optional)") + (" (unpinned)" if cell["profile"] in unpinned else "")
         r = cell["page"]
         vendor = f"`{cell['vendor']}`" if cell["vendor"] else "-"
         if r is None:

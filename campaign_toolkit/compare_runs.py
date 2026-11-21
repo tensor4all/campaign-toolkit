@@ -117,6 +117,11 @@ def main(argv=None, root=None) -> int:
                  f"with the previous revision recorded for the same arm, and compare the arms by "
                  f"reading their pages side by side.")
 
+    pinned = [(m.get("threads") or {}).get("pinned") is not False for m in (before_manifest, after_manifest)]
+    if pinned[0] != pinned[1]:
+        sys.exit("ERROR: one run is pinned and the other is not (threads.pinned); an unpinned "
+                 "profile's cells are never compared with a pinned profile's")
+
     # A ratio is only a revision comparison when the thing that changed is the thing under
     # test. The measured library is expected to differ; if two runs were taken against
     # different baselines, or by different harnesses, the change measured is a different one

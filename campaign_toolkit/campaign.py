@@ -152,6 +152,10 @@ def check_cpu_sets(suite: dict) -> None:
         _check_pairs(threads, sets, "")
 
 
+# The CPU set an unpinned profile records: a marker, never a CPU list the process did not run on.
+UNPINNED = "unpinned"
+
+
 def cpu_sets_for(suite: dict, profile: dict, threads) -> tuple:
     """`({str(threads): measured CPUs}, source)` for a run of `suite` on `profile`.
 
@@ -161,7 +165,12 @@ def cpu_sets_for(suite: dict, profile: dict, threads) -> tuple:
     before profiles carried rows) keeps it on every profile, so no recorded campaign moves its
     CPUs when the toolkit does; `declarations` asks such a suite to name its profile once it
     lists more than one. `source` says which of the three decided.
+
+    A profile declaring `pinned: false` has no CPUs to choose: every row is recorded as
+    `UNPINNED`, and a suite list (written for some other machine) is not borrowed for it.
     """
+    if profile.get("pinned") is False:
+        return {str(t): UNPINNED for t in threads}, f"{profile['name']} is unpinned (pinned: false)"
     spec = run_spec(suite)
     declared, sets = list(spec["threads"]), spec.get("cpu_sets", [])
     if isinstance(sets, dict) and profile["name"] in sets:

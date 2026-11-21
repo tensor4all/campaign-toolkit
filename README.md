@@ -104,6 +104,17 @@ Three things the first `zen2-cpu` smoke (tensor4all-meta#76, 3.3) had to learn:
   `verify.n` names is refused. A smoke asks for the `verify.n` shapes (tlinalg: `4,8,16`), not
   for one shape.
 
+### A host that cannot pin
+
+A host without a CPU affinity interface (macOS) cannot pin a measured process, so a pinned
+profile is refused there. Such a host gets a profile declaring `pinned: false` and no
+`thread_rows` (`apple-m4max`). Its runs record `threads.pinned: false`, every CPU set as
+`unpinned`, no observer block and no idle policy under `guards`, because the protocol script
+runs the command unpinned and ungated off Linux. `validate_run` refuses a manifest whose
+`threads.pinned` disagrees with its profile. Pages say **unpinned** in their header, the index
+marks the profile `(unpinned)`, the site says it is not comparable with the pinned profiles,
+`compare_runs` refuses a pinned/unpinned pair, and an unpinned run adds no trend point.
+
 ### The link preflight: a missing library fails in seconds, not at the build
 
 `campaign-link-preflight` (`python3 -m campaign_toolkit.link_preflight`) checks that every
