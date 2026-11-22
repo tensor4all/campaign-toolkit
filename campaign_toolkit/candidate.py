@@ -127,7 +127,9 @@ def _series(run_dir, engine, repetitions):
                 # changes the row-major path must never be averaged with the column-major one.
                 key = (int(row['threads']), row['family'], row['dtype'], row['order'],
                        f"{row['m']}x{row['n']}" + (f"x{row['k']}" if row['k'] else ''), row['note'])
-                identity = timing_evidence.cell(row)
+                # The cell's identity under the engine's current name, so a baseline recorded
+                # before a rename pairs with a candidate recorded after it.
+                identity = timing_evidence.cell({**row, 'row': descriptor.canonical_engine(row['row'])})
                 if identities.setdefault(key, identity) != identity:
                     raise ValueError(f'{engine}: distinct recorded cells share the projected key '
                                      f'{key}: {identities[key]} vs {identity}')

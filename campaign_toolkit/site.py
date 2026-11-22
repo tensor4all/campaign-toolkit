@@ -116,6 +116,9 @@ def current_pages(site_root, revisions):
         parts = page.relative_to(site_root).parts
         profile = parts[-3] if len(parts) >= 3 else ''
         suite = parts[:-3] + parts[-2:-1] if len(parts) >= 3 else parts[:-1]
+        # A suite recorded under a historical id is the current suite's cell, not a second one.
+        from . import descriptor
+        suite = tuple(descriptor.canonical_suite(part) for part in suite)
         stamp = (_recorded(page), page.stat().st_mtime)
         groups.setdefault((profile, suite, _arm(page)), []).append((page, at_pin(page), stamp))
     chosen, missing = [], []

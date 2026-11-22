@@ -111,6 +111,27 @@ class AliasedCampaignTest(unittest.TestCase):
         svg, data = trend.render(entry, old)[:2]
         self.assertIn("algo-line", svg)
 
+    def test_a_baseline_under_old_engine_names_pairs_with_a_candidate_under_new_ones(self):
+        import test_candidate
+        old = test_candidate.make_run(self.root / "probe", "old")
+        new = test_candidate.make_run(self.root / "probe", "new")
+        for path in new.glob("*.csv"):
+            test_candidate.rewrite(path, lambda rows: [
+                {**r, "row": "algo-line" if r["row"] == "faer-fork" else r["row"]} for r in rows])
+            test_candidate.rewrite(old / path.name, lambda rows: [
+                {**r, "row": "algo-lane" if r["row"] == "faer-fork" else r["row"]} for r in rows])
+        # The cell identities (and the timings) are one series under either engine name.
+        self.assertEqual(candidate._series(old, "algo-lane", 2), candidate._series(new, "algo-line", 2))
+
+    def test_the_file_name_fallback_lists_one_cell_per_suite(self):
+        site_root = self.root / "result"
+        old = next((site_root / "fixture-cpu/fixture-kernels").glob("*.md"))
+        new_dir = site_root / "fixture-cpu/fixture-core"
+        new_dir.mkdir(parents=True)
+        shutil.copy(old, new_dir / old.name)
+        pages, _missing = site.current_pages(site_root, [])
+        self.assertEqual(len([p for p in pages if p.parent.parent.name == "fixture-cpu"]), 1)
+
     def test_lookups_accept_either_name(self):
         d = descriptor.current()
         self.assertEqual(d.suite_path("fixture-kernels").name, "fixture-core.yaml")
