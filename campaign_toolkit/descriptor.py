@@ -162,7 +162,35 @@ class Descriptor:
         return self.resolve(self.data["suites_dir"])
 
     def suite_path(self, suite_id: str) -> pathlib.Path:
-        return self.suites_dir / f"{suite_id}.yaml"
+        """The declaration of a suite, named by its current id or by a historical one."""
+        return self.suites_dir / f"{self.canonical_suite(suite_id)}.yaml"
+
+    # ---- historical names -----------------------------------------------
+    @property
+    def aliases(self) -> dict:
+        """`{"suites": {old: new}, "engines": {old: new}}`: names a campaign has renamed.
+
+        A recording is never rewritten, so a run recorded before a rename keeps the names it was
+        recorded under -- its directory, its manifest, its CSV rows and its report. The readers
+        that look a name up (a suite's declaration, an engine's provider) accept either name, and
+        the readers that aggregate runs (the index, the charts, the trend, the comparisons) speak
+        the current one, so an old run and a new run of the same suite land in the same cell.
+        """
+        declared = self.data.get("aliases") or {}
+        return {"suites": dict(declared.get("suites") or {}),
+                "engines": dict(declared.get("engines") or {})}
+
+    def canonical_suite(self, suite_id: str) -> str:
+        """The current id of a suite named by a historical id, or the id itself."""
+        return self.aliases["suites"].get(suite_id, suite_id)
+
+    def canonical_engine(self, engine: str) -> str:
+        """The current name of an engine (or the provider named after it), or the name itself."""
+        return self.aliases["engines"].get(engine, engine)
+
+    def suite_names(self, suite_id: str) -> list:
+        """Every directory name a suite's runs can live under: its id, then its historical ids."""
+        return [suite_id] + sorted(old for old, new in self.aliases["suites"].items() if new == suite_id)
 
     @property
     def data_dir(self) -> pathlib.Path:
@@ -295,6 +323,26 @@ def current() -> Descriptor:
 
 def root() -> pathlib.Path:
     return current().root
+
+
+def canonical_engine(engine: str) -> str:
+    """`Descriptor.canonical_engine` of the current campaign, or the name itself outside one.
+
+    The chart readers are also used on bare run directories with no campaign around them; there
+    is nothing to rename there, so a missing descriptor leaves the name as recorded.
+    """
+    try:
+        return current().canonical_engine(engine)
+    except DescriptorError:
+        return engine
+
+
+def canonical_suite(suite_id: str) -> str:
+    """`Descriptor.canonical_suite` of the current campaign, or the id itself outside one."""
+    try:
+        return current().canonical_suite(suite_id)
+    except DescriptorError:
+        return suite_id
 
 
 def run_module(module: str, args, root=None, capture=False):

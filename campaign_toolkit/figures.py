@@ -25,7 +25,7 @@ import shutil
 import yaml
 
 from . import charts, descriptor, throughput, trend
-from .campaign import load, page_source
+from .campaign import load, page_source, suite_of
 
 OUT_DIR = 'figures'
 SECTIONS = (('throughput', 'Throughput against size',
@@ -73,7 +73,7 @@ def throughput_figures(spec, runs, out_dir):
     for profile, group in by_profile(runs).items():
         run_dirs = []
         for want in spec['runs']:
-            match = [run for run, manifest in group if manifest['suite_id'] == want['suite']
+            match = [run for run, manifest in group if suite_of(manifest) == d.canonical_suite(want['suite'])
                      and (want.get('vendor') is None or _vendor(manifest) == want['vendor'])]
             run_dirs.append(match[-1] if match else None)
         if not any(run_dirs):
@@ -101,7 +101,7 @@ def case_figures(suites, runs, out_dir):
     target.mkdir(parents=True, exist_ok=True)
     out = []
     for run, manifest in runs:
-        if manifest['suite_id'] not in suites:
+        if suite_of(manifest) not in {descriptor.current().canonical_suite(s) for s in suites}:
             continue
         _, cells = trend.run_cells(run)
         cases = list(dict.fromkeys(case for case, _, _ in cells))
@@ -111,9 +111,9 @@ def case_figures(suites, runs, out_dir):
                   for (case, engine, threads), times in cells.items()}
         arm = _vendor(manifest)
         profile = manifest['target_profile']
-        title = f'{profile} {manifest["suite_id"]}{" " + arm if arm else ""}: median time per case'
+        title = f'{profile} {suite_of(manifest)}{" " + arm if arm else ""}: median time per case'
         svg, _ = charts.dot_plot(title, cases, engines, values, panels)
-        stem = f'cases-{profile}-{manifest["suite_id"]}{"-" + arm if arm else ""}'
+        stem = f'cases-{profile}-{suite_of(manifest)}{"-" + arm if arm else ""}'
         (target / f'{stem}.svg').write_text(svg)
         (target / f'{stem}.md').write_text(charts.dot_plot_markdown(title, cases, engines, values, panels) + '\n')
         out.append(dict(kind='cases', title=title, svg=target / f'{stem}.svg', data=target / f'{stem}.md'))

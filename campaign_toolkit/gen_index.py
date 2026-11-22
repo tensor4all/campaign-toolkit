@@ -153,18 +153,21 @@ def collect():
     for suite in suites:
         arms = vendor_engines(run_spec(suite)["engines"]) or [None]
         wanted = _unique(list(suite["required_profiles"]) + list(suite.get("optional_profiles", [])))
-        on_disk = sorted(p.parent.name for p in d.data_dir.glob(f"*/{suite['id']}") if p.is_dir())
+        # A suite's runs live under its id and, when it was renamed, under each historical id: a
+        # recording is not moved, so the cell reads both and the newest run decides it.
+        names = d.suite_names(suite["id"])
+        on_disk = sorted({p.parent.name for name in names for p in d.data_dir.glob(f"*/{name}") if p.is_dir()})
         for profile in _unique(wanted + on_disk):
             required = profile in suite["required_profiles"]
             if profile in wanted:
                 declared.extend(dict(suite=suite["id"], profile=profile, vendor=arm, required=required)
                                 for arm in arms)
-            cell = d.data_dir / profile / suite["id"]
-            manifests = sorted(cell.glob("*/run.yaml")) if cell.is_dir() else []
+            manifests = [(name, mf) for name in names
+                         for mf in sorted((d.data_dir / profile / name).glob("*/run.yaml"))]
             # One page per revision per arm: keep the run whose numbers the page actually holds.
-            for mf in manifests:
+            for name, mf in manifests:
                 m = load(mf)
-                rel = page_relative(profile, suite["id"], m)
+                rel = page_relative(profile, name, m)
                 page = d.root / rel
                 if not page.exists():
                     continue
@@ -195,7 +198,7 @@ def collect():
     declared_suites = {s["id"] for s in suites}
     for mf in sorted(d.data_dir.glob("*/*/*/run.yaml")):
         profile, suite_id = mf.parent.parent.parent.name, mf.parent.parent.name
-        if suite_id in declared_suites:
+        if d.canonical_suite(suite_id) in declared_suites:
             continue
         m = load(mf)
         try:

@@ -256,6 +256,23 @@
         "minLength": 1
       }
     },
+    "aliases": {
+      "description": "Names the campaign has renamed, historical -> current. Recordings keep the names they were recorded under; the readers that look a name up accept either, and the readers that aggregate runs print the current one.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "suites": {
+          "description": "Historical suite id -> current suite id (a file under suites_dir).",
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "engines": {
+          "description": "Historical engine (and provider) name -> current engine name (a key of engines).",
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        }
+      }
+    },
     "vendor_providers": {
       "description": "Providers that own the BLAS/LAPACK symbols. They are mutually exclusive in one process, so they are the axis a run -- and a page -- is split on.",
       "type": "array",

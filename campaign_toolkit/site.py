@@ -207,6 +207,9 @@ def _group_by_suite(paths, site_rel):
     for path in paths:
         parts = pathlib.PurePosixPath(path).relative_to(site_rel).parts
         suite = '/'.join(parts[:-3] + parts[-2:-1]) if len(parts) >= 3 else '/'.join(parts[:-1])
+        # A suite recorded under a historical id is listed under its current one.
+        from . import descriptor
+        suite = '/'.join(descriptor.canonical_suite(part) for part in suite.split('/'))
         groups.setdefault(suite or '.', []).append(path)
     return sorted(groups.items())
 
@@ -378,6 +381,28 @@ def campaign_view(root, site_root):
                 unpinned=d.unpinned_profiles())
 
 
+def historical_names_note(page, site_root):
+    """A one-paragraph key for a record page recorded under names the campaign has since renamed.
+
+    The page is the recording's own report and is not rewritten, so it keeps the suite and engine
+    names it was recorded under; the note names them next to their current names. Empty when the
+    page's suite directory is not a historical name or there is no campaign descriptor.
+    """
+    from . import descriptor
+    try:
+        d = descriptor.current()
+    except descriptor.DescriptorError:
+        return ''
+    parts = page.relative_to(site_root).parts
+    suite = parts[-2] if len(parts) >= 2 else ''
+    if suite not in d.aliases['suites']:
+        return ''
+    pairs = [(suite, d.aliases['suites'][suite])] + sorted(d.aliases['engines'].items())
+    key = ', '.join(f'<code>{html.escape(old)}</code> is <code>{html.escape(new)}</code>' for old, new in pairs)
+    return (f'<p class="summary"><strong>Recorded under historical names.</strong> This record keeps '
+            f'the names it was recorded under: {key}.</p>\n')
+
+
 def render_page(page, site_root, root, blob, repo_ref, title):
     """Write `<page>.html`: the Markdown page as HTML, with a back link and its source link."""
     import markdown
@@ -392,17 +417,18 @@ def render_page(page, site_root, root, blob, repo_ref, title):
 <style>{CSS}</style></head><body>
 <nav><a href="{html.escape(str(up / 'index.html'))}">current results</a> &middot;
 <a href="{html.escape(str(up / 'history.html'))}">history</a> &middot; {source} (<code>{html.escape(str(rel))}</code>)</nav>
-{body}
+{historical_names_note(page, site_root)}{body}
 </body></html>
 """)
     return out
 
 
-def _page_item(page, site_root, root, blob, repo_ref, extra=''):
+def _page_item(page, site_root, root, blob, repo_ref, extra='', label=None):
+    """One linked page; `label` replaces the path as the link text (the file stays the target)."""
     rel = page.relative_to(site_root)
     source = (f' <span class="muted">(<a href="{html.escape(blob)}/blob/{html.escape(repo_ref)}/'
               f'{html.escape(str(page.relative_to(root)))}">source</a>)</span>' if 'github.com' in blob else '')
-    return (f'<li><a href="{html.escape(str(rel.with_suffix(".html")))}">{html.escape(str(rel))}</a>'
+    return (f'<li><a href="{html.escape(str(rel.with_suffix(".html")))}">{html.escape(label or str(rel))}</a>'
             f'{extra}{source}</li>')
 
 
@@ -492,7 +518,10 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
                     render_page(page, site_root, root, blob, repo_ref, heading)
                     current.append(page)
                     arm = f" <span class=\"muted\">{html.escape(c['vendor'])}</span>" if c['vendor'] else ''
-                    items.append(_page_item(page, site_root, root, blob, repo_ref, arm))
+                    # The cell's suite under its current name: a page recorded before a rename
+                    # sits under the historical directory, which the link still points at.
+                    label = f"{profile}/{c['suite']}/{page.name}"
+                    items.append(_page_item(page, site_root, root, blob, repo_ref, arm, label))
             missing = [(c['suite'], c['vendor'] or '') for c in cells if not c['page']]
             shown += len(items)
             sections.append(

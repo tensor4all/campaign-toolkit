@@ -15,7 +15,7 @@ import statistics
 import sys
 
 from . import descriptor
-from .campaign import case_dims, load, provider_of
+from .campaign import case_dims, load, provider_of, same_name
 
 
 def columns():
@@ -274,11 +274,13 @@ def render(manifest, suite, rows, run_dir):
     library = manifest["library"]
     upstream = manifest.get("upstream") or {}
     providers = manifest.get("providers", [])
+    # A run recorded before an engine rename names its providers by the historical name; they are
+    # the providers of the current name, and the page keeps printing the name it recorded.
     deps = ([p for p in providers if p["name"] in d.provider_packages]
-            or [p for p in providers if p["name"] in d.measured_providers])
+            or [p for p in providers if d.canonical_engine(p["name"]) in d.measured_providers])
     # An external provider is not a Cargo dependency of the measured checkout, so it is printed
     # on its own line rather than left to the dependency selection to include or drop.
-    external = [p for p in providers if p["name"] in d.external_providers]
+    external = [p for p in providers if d.canonical_engine(p["name"]) in d.external_providers]
     engines = manifest["run_spec"]["engines"]
     # The columns are the engines this run recorded measuring, in the declaration's order: a page
     # prints the arms it has, and a vendor arm has one LAPACK row because one binary links one
@@ -338,7 +340,7 @@ def render(manifest, suite, rows, run_dir):
         out.append(f"  Known blind spot: {spot}")
     out += ["- **Rows** — one row per engine in every table below:"]
     for engine in row_names:
-        doc = suite["engines_doc"].get(engine)
+        doc = suite["engines_doc"].get(engine) or suite["engines_doc"].get(d.canonical_engine(engine))
         if doc is None:
             out.append(f"  - `{engine}` — (undocumented in the suite declaration)")
             continue
@@ -347,10 +349,10 @@ def render(manifest, suite, rows, run_dir):
         if doc.get("caveat"):
             out.append(f"    Caveat: {doc['caveat']}")
         if provider_of(engine) in d.measured_providers and deps:
-            own = [p for p in deps if p["name"] == provider_of(engine)]
+            own = [p for p in deps if same_name(p["name"], provider_of(engine))]
             out.append("    As measured: " + "; ".join(provider_text(p) for p in (own or deps)))
         if provider_of(engine) in d.external_providers:
-            own = [p for p in external if p["name"] == provider_of(engine)]
+            own = [p for p in external if same_name(p["name"], provider_of(engine))]
             if own:
                 out.append("    As measured: " + "; ".join(provider_text(p) for p in own))
         if engine == f"lapack-{vendor.get('name')}":

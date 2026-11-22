@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from . import charts
+from . import charts, descriptor
 
 
 PLOTTABLE_NOTES = frozenset({"", "api-inclusive"})
@@ -36,7 +36,10 @@ def load_run(run_dir, dtype='f64', order='c'):
                     continue
                 if row['m'] != row['n']:
                     continue
-                cells[(int(row['threads']), row['family'], int(row['n']), row['note'], row['row'])][repeat] = \
+                # The series name engines by their current names, so a run recorded under a
+                # historical engine name draws on the same line as a new one.
+                engine = descriptor.canonical_engine(row['row'])
+                cells[(int(row['threads']), row['family'], int(row['n']), row['note'], engine)][repeat] = \
                     statistics.median(json.loads(row['samples_ms']))
     return cells
 

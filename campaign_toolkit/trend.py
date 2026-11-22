@@ -109,7 +109,10 @@ def run_cells(run_dir):
                     continue
                 value = (statistics.median(samples(row, policy['repetitions'])) if v2
                          else float(row['total_ms']))
-                cells.setdefault((case_key(row, v2), row['row'], int(row['threads'])), []).append(value)
+                # Under the engine's current name: a run recorded under a historical name is the
+                # same series as a new one.
+                engine = descriptor.canonical_engine(row['row'])
+                cells.setdefault((case_key(row, v2), engine, int(row['threads'])), []).append(value)
     return manifest, cells
 
 
@@ -134,7 +137,8 @@ def points_from_run(run_dir):
     out = []
     for (case, engine, threads), values in sorted(cells.items()):
         median, spread = summary(values)
-        out.append(dict(campaign=d.data['id'], suite=manifest['suite_id'], case_key=case, engine=engine,
+        out.append(dict(campaign=d.data['id'], suite=d.canonical_suite(manifest['suite_id']), case_key=case,
+                        engine=engine,
                         threads=threads, profile=manifest['target_profile'],
                         library_version=library.get('version'), library_commit=str(library.get('commit')),
                         timing_policy=timing_policy_of(manifest), power=power_of(manifest),
@@ -178,9 +182,10 @@ def week_of(timestamp):
 
 def select(points, entry):
     """The points one `trend:` entry draws."""
+    engines = [descriptor.canonical_engine(e) for e in entry['engines']]
     return [p for p in points
-            if p['suite'] == entry['suite'] and p['case_key'] == entry['case']
-            and p['engine'] in entry['engines'] and p['threads'] in entry['threads']
+            if p['suite'] == descriptor.canonical_suite(entry['suite']) and p['case_key'] == entry['case']
+            and p['engine'] in engines and p['threads'] in entry['threads']
             and ('vendor' not in entry or p.get('vendor') == entry['vendor'])]
 
 
@@ -250,7 +255,7 @@ def render(entry, points, axis='pin'):
         stamp = max(instant(p['timestamp']) for p in by_x.values())
         newest[cond] = max(newest.get(cond, stamp), stamp)
     conditions = sorted(newest, key=lambda c: newest[c], reverse=True)
-    engines = list(entry['engines'])
+    engines = [descriptor.canonical_engine(e) for e in entry['engines']]
     unit = units[0] if units else 'ms'
     values = [v for by_x in lines.values() for p in by_x.values()
               for v in (p['median'], p['median'] + p['spread'], p['median'] - p['spread']) if v > 0]

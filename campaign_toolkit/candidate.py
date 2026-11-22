@@ -23,7 +23,7 @@ import statistics
 
 import yaml
 
-from . import timing_evidence
+from . import descriptor, timing_evidence
 
 IDENTITY_KEYS = ('upstream', 'harness', 'toolkit')
 HOST_KEYS = ('cpu', 'logical_cpus', 'l3', 'l3_domains', 'hostname', 'arch')
@@ -37,7 +37,8 @@ def identity_differences(baseline, candidate):
     """[] when the candidate run may be compared with the baseline; a list of reasons otherwise."""
     baseline, candidate = _manifest(baseline), _manifest(candidate)
     out = []
-    if baseline.get('suite_id') != candidate.get('suite_id'):
+    if (descriptor.canonical_suite(str(baseline.get('suite_id')))
+            != descriptor.canonical_suite(str(candidate.get('suite_id')))):
         out.append(f"suite: {baseline.get('suite_id')!r} vs {candidate.get('suite_id')!r}")
     if baseline.get('suite_sha256') != candidate.get('suite_sha256'):
         out.append('the suite declaration changed between the runs')
@@ -111,7 +112,7 @@ def _series(run_dir, engine, repetitions):
         repeat = name.split('-')[0]
         with (run_dir / name).open(newline='') as handle:
             for row in csv.DictReader(handle):
-                if row['row'] != engine:
+                if descriptor.canonical_engine(row['row']) != descriptor.canonical_engine(engine):
                     continue
                 # The memory order is part of a cell's identity: an optimization that only
                 # changes the row-major path must never be averaged with the column-major one.

@@ -267,6 +267,26 @@ uses the `markdown` package.
 
 ## Charts, trends and the generated-file check
 
+### Renaming a suite or an engine
+
+A recording is never rewritten, so a run recorded before a rename keeps its directory, its
+manifest, its CSV rows and its report under the old names. The descriptor maps them:
+
+```yaml
+aliases:
+  suites: {faer-kernels: colmat-kernels}     # historical suite id -> current id (a suites_dir file)
+  engines: {faer-fork: colmat}               # historical engine/provider name -> a key of engines
+```
+
+The readers that look a name up (`find_suite`, `suite_path`, `provider_of`, the validator's
+`suite_file` check, the report's engine documentation) accept either name, and the readers that
+aggregate (`gen_index`, the site, the charts, the trend, `cell_of` and the comparisons) print the
+current one, so an old run and a new run of one suite land in the same cell. A regenerated old
+report is byte-identical, because it still prints the names its rows carry. The recorder records
+under the current names, whichever one it is given. The site's HTML copy of a record kept under a
+historical suite directory opens with a one-line key from the old names to the current ones.
+`declarations` refuses an alias that points at nothing, or one whose old name is still current.
+
 Charts are generated when the site is built, from the runs behind the current pages, and are
 not committed. The descriptor declares them (all optional):
 
