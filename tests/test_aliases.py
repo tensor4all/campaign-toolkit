@@ -90,6 +90,20 @@ class AliasedCampaignTest(unittest.TestCase):
         self.assertEqual(len(line), 1)
         self.assertEqual(throughput.points(cells, 1, "mul", "algo-lane", 2.0), line)
 
+    def test_the_recorder_covers_a_suite_still_listing_the_historical_engine(self):
+        from campaign_toolkit import record_run
+        suite = yaml.safe_load((self.root / "benchmarks/suites/fixture-core.yaml").read_text())
+        suite["runs"][0]["engines"] = ["algo-lane" if e == "algo-line" else e for e in suite["runs"][0]["engines"]]
+        declared = campaign.engines_for_vendor(suite, "openblas")
+        recorded = [descriptor.current().canonical_engine(e) for e in declared]
+        self.assertNotEqual(declared, recorded)
+        self.assertEqual(recorded, record_run.canonical_engines(declared))
+
+    def test_trend_points_written_under_old_names_are_selected(self):
+        points = [dict(suite="fixture-kernels", case_key="c", engine="algo-lane", threads=1)]
+        entry = dict(suite="fixture-core", case="c", engines=["algo-line"], threads=[1])
+        self.assertEqual(trend.select(points, entry), points)
+
     def test_lookups_accept_either_name(self):
         d = descriptor.current()
         self.assertEqual(d.suite_path("fixture-kernels").name, "fixture-core.yaml")

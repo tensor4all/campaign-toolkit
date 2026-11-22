@@ -132,7 +132,7 @@ def revisions_line(run_dirs, labels=None):
             missing.append((labels[index] if labels and index < len(labels) else f'run {index}'))
             continue
         manifest = yaml.safe_load((Path(run_dir) / 'run.yaml').read_text())
-        role = 'large tier' if 'large' in str(manifest.get('suite_id', '')) else 'daily'
+        role = 'large tier' if 'large' in descriptor.canonical_suite(str(manifest.get('suite_id', ''))) else 'daily'
         short = lambda block: str((manifest.get(block) or {}).get('commit') or 'none')[:7]  # noqa: E731
         parts.append(f'{role} {manifest.get("vendor", {}).get("name", "?")}: fork `{short("library")}`, '
                      f'upstream `{short("upstream")}`, harness `{short("harness")}`')

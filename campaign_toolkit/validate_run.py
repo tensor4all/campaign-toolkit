@@ -226,8 +226,9 @@ def validate(path, check_git=True, allow_pre_release=False):
             # validation depend on where it happens to be run from.
             declared = descriptor.root() / declared
         # A run recorded before its suite was renamed names the declaration by its historical
-        # file name; that file is the current declaration under its old name, not another suite.
-        historical = (manifest["suite_id"] in descriptor.current().suite_names(suite["id"])
+        # file name, which no longer exists: accepted only when the manifest's suite_id is itself a
+        # historical id of this suite and the file named is exactly `<suites_dir>/<that id>.yaml`.
+        historical = (manifest["suite_id"] != suite["id"]
                       and declared.resolve() == (suite_file.parent / f"{manifest['suite_id']}.yaml").resolve())
         if declared.resolve() != suite_file.resolve() and not historical:
             errors.append(f"suite_file {declared} is not the declaration for {manifest['suite_id']!r} ({suite_file})")

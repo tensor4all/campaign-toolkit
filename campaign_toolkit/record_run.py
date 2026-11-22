@@ -40,8 +40,8 @@ import yaml
 
 from . import descriptor, hostinfo, observer_audit
 from . import link_preflight
-from .campaign import (check_cpu_sets, cpu_sets_for, engines_for_vendor, populations, provider_of,
-                       same_populations, vendor_engines)
+from .campaign import (canonical_engines, check_cpu_sets, cpu_sets_for, engines_for_vendor, populations,
+                       provider_of, same_populations, vendor_engines)
 
 
 def sh(cmd, **kw):
@@ -1251,7 +1251,9 @@ def main(argv=None, root=None):
             "covers_declared_suite": (threads == spec["threads"]
                                       and dtypes == spec["dtypes"]
                                       and order == spec.get("order", [])
-                                      and engines == engines_for_vendor(suite, arm)
+                                      # under current names, as coverage_of and the validator
+                                      # compare: a suite may still list a historical engine
+                                      and engines == canonical_engines(engines_for_vendor(suite, arm))
                                       and same_populations(covered, declared)),
         },
     }

@@ -182,10 +182,13 @@ def week_of(timestamp):
 
 def select(points, entry):
     """The points one `trend:` entry draws."""
+    # Both sides under current names: a points document written before a rename (or by another
+    # repository) carries the historical suite and engine names.
     engines = [descriptor.canonical_engine(e) for e in entry['engines']]
+    suite = descriptor.canonical_suite(entry['suite'])
     return [p for p in points
-            if p['suite'] == descriptor.canonical_suite(entry['suite']) and p['case_key'] == entry['case']
-            and p['engine'] in engines and p['threads'] in entry['threads']
+            if descriptor.canonical_suite(p['suite']) == suite and p['case_key'] == entry['case']
+            and descriptor.canonical_engine(p['engine']) in engines and p['threads'] in entry['threads']
             and ('vendor' not in entry or p.get('vendor') == entry['vendor'])]
 
 
