@@ -314,14 +314,18 @@ def render(manifest, suite, rows, run_dir):
         + (" — **provisional**: recorded on a development host, superseded by the measurement"
            " host's dataset" if (manifest.get('host') or {}).get('role', 'development') != 'measurement'
            else " — published dataset host"),
+        *(["- CPU affinity: **unpinned** (the profile declares `pinned: false`): no CPU set, observer "
+           "split or idle gate applied, so compare these cells only with other runs of this profile, "
+           "never with a pinned profile's"] if manifest["threads"].get("pinned") is False else []),
         f"- timestamp: `{manifest['timestamp']}`",
         f"- timing policy: v{manifest['timing_policy']['version']}, "
         f"{manifest['timing_policy']['statistic']} of {manifest['timing_policy']['repetitions']} reps, "
         f"priming {manifest['timing_policy']['minimum_untimed_priming_ms']} ms "
         f"(time-based, identical on every row)",
-        f"- guards: idle window {manifest['guards']['idle_window_seconds']} s, "
-        f"max busy {manifest['guards']['max_busy_percent']}% including SMT siblings, "
-        f"{manifest['guards']['attempts']} attempts",
+        (f"- guards: idle window {manifest['guards']['idle_window_seconds']} s, "
+         f"max busy {manifest['guards']['max_busy_percent']}% including SMT siblings, "
+         f"{manifest['guards']['attempts']} attempts" if 'idle_window_seconds' in manifest['guards']
+         else "- guards: none, no idle gate applied"),
         f"- command: `{manifest['command']}`",
         f"- raw data: `{run_dir.relative_to(d.root)}/`",
         "",

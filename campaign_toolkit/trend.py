@@ -122,6 +122,10 @@ def points_from_run(run_dir):
     """Every trend point of one run, as schema documents."""
     d = descriptor.current()
     manifest, cells = run_cells(run_dir)
+    # ponytail: an unpinned run draws no trend point, because a chart puts every profile's lines
+    # side by side; give unpinned profiles their own chart if they ever need a trend.
+    if (manifest.get('threads') or {}).get('pinned') is False:
+        return []
     library = manifest.get('library') or {}
     try:
         run_id = pathlib.Path(run_dir).resolve().relative_to(d.root / d.data['data_dir']).as_posix()

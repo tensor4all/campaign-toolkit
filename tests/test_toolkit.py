@@ -116,7 +116,7 @@ class FixtureCampaignTest(unittest.TestCase):
         with (mock.patch.object(record_run, 'build', return_value=pin),
               mock.patch.object(record_run, 'boost_state', return_value={}),
               mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
-              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={8}),
               mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
                                 original['library']['commit'] if args[0] == 'rev-parse' else ''),
               mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
@@ -134,11 +134,62 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertIs(manifest['local_commits_allowed'], True)
         self.assertNotIn('pre_release', manifest)
 
+    def test_an_unpinned_profile_records_pinned_false_and_no_cpu_set(self):
+        # macOS has no affinity interface (cpueinsum-benchmark#18): a pinned profile is refused
+        # there, and a `pinned: false` profile records markers, never CPUs or an idle policy
+        # the run did not have.
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+
+        def process(args, **kwargs):
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
+
+        def record():
+            return record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1', '--label', 'mac',
+                                    '--allow-local-commits'], root=self.root)
+
+        with contextlib.ExitStack() as stack:
+            for p in self._record_patches(original, pin):
+                stack.enter_context(p)
+            stack.enter_context(mock.patch.object(record_run, 'can_pin', return_value=False))
+            # an unpinned run reads no affinity at all
+            stack.enter_context(mock.patch.object(record_run, 'observer_cpus', side_effect=AssertionError))
+            stack.enter_context(mock.patch.object(record_run.subprocess, 'run', side_effect=process))
+            stack.enter_context(mock.patch.object(descriptor, 'run_module',
+                                                  return_value=subprocess.CompletedProcess([], 0, '', '')))
+            with self.assertRaisesRegex(SystemExit, 'no CPU affinity'):
+                record()
+            profiles = self.root / 'benchmarks/profiles.yaml'
+            declared = yaml.safe_load(profiles.read_text())
+            declared['profiles'][0]['pinned'] = False
+            profiles.write_text(yaml.safe_dump(declared))
+            self.assertEqual(record(), 0)
+        run = sorted((self.root / RUN_A_REL).parent.glob('*-mac'))[-1]
+        manifest = campaign.load(run / 'run.yaml')
+        self.assertIs(manifest['threads']['pinned'], False)
+        self.assertEqual(manifest['threads']['cpu_sets'], {'1': 'unpinned'})
+        self.assertNotIn('observer', manifest['threads'])
+        self.assertNotIn('idle_window_seconds', manifest['guards'])
+        self.assertIsNone(manifest['guards']['sibling_aware'])
+        self.assertEqual(validate_run.validate(str(run / 'run.yaml')), [])
+        self.assertEqual(report_run.main(['--run-dir', str(run)], root=self.root), 0)
+        report = (run / 'report.md').read_text()
+        self.assertIn('CPU affinity: **unpinned**', report)
+        self.assertIn('guards: none', report)
+        # The profile and the manifest must agree, in both directions.
+        declared['profiles'][0].pop('pinned')
+        profiles.write_text(yaml.safe_dump(declared))
+        self.assertTrue(any('threads.pinned' in e for e in validate_run.validate(str(run / 'run.yaml'))))
+
     def _record_patches(self, original, pin, build=None):
         return (mock.patch.object(record_run, 'build', build or mock.Mock(return_value=pin)),
                 mock.patch.object(record_run, 'boost_state', return_value={}),
                 mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
-                mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+                mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={8}),
                 mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
                                   original['library']['commit'] if args[0] == 'rev-parse' else ''),
                 mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
@@ -394,7 +445,7 @@ class FixtureCampaignTest(unittest.TestCase):
                   # turbo enabled must not decide whether this test can run.
                   mock.patch.object(record_run, 'boost_state', return_value={}),
                   mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
-                  mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+                  mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={8}),
                   mock.patch.object(record_run, 'git', side_effect=lambda path, *args:
                                     original['library']['commit'] if args[0] == 'rev-parse' else ''),
                   mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
@@ -429,7 +480,7 @@ class FixtureCampaignTest(unittest.TestCase):
         with (mock.patch.object(record_run, 'build', return_value=pin),
               mock.patch.object(record_run, 'boost_state', return_value={}),
               mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
-              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={8}),
               mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
                                 original['library']['commit'] if a[0] == 'rev-parse' else ''),
               mock.patch.object(record_run, 'protocol_script', return_value=descriptor.current().profiles_file),
@@ -505,7 +556,7 @@ class FixtureCampaignTest(unittest.TestCase):
         with (mock.patch.object(record_run, 'build', return_value=pin),
               mock.patch.object(record_run, 'boost_state', return_value={}),
               mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
-              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={8}),
               mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
                                 original['library']['commit'] if a[0] == 'rev-parse' else ''),
               mock.patch.object(record_run, 'protocol_script',
@@ -562,7 +613,7 @@ class FixtureCampaignTest(unittest.TestCase):
         with (mock.patch.object(record_run, 'sh', side_effect=fake_sh),
               mock.patch.object(record_run, 'boost_state', return_value={}),
               mock.patch.object(record_run.observer_audit, 'offenders', return_value=([], [], 0)),
-              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={8}),
               mock.patch.object(record_run, 'git', side_effect=lambda path, *a:
                                 original['library']['commit'] if a[0] == 'rev-parse' else ''),
               mock.patch.object(record_run, 'protocol_script',
@@ -695,9 +746,9 @@ class FixtureCampaignTest(unittest.TestCase):
         # must be refused there too.
         with (mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}),
               mock.patch.object(record_run, 'online_cpus', return_value={0, 1, 2, 3, 4, 5, 6, 7})):
-            with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={0, 1, 2, 3}):
+            with mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={0, 1, 2, 3}):
                 record_run.require_observer_off_measured_cpus({'1': '4'})       # off the domain
-            with mock.patch.object(record_run.os, 'sched_getaffinity', return_value={7}):
+            with mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={7}):
                 with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
                     record_run.require_observer_off_measured_cpus({'1': '4'})
 
@@ -741,7 +792,7 @@ class FixtureCampaignTest(unittest.TestCase):
         topo = (mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}),
                 mock.patch.object(record_run, 'online_cpus',
                                   return_value={0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15}),
-                mock.patch.object(record_run.os, 'sched_getaffinity',
+                mock.patch.object(record_run.os, 'sched_getaffinity', create=True,
                                   return_value={0, 1, 2, 3, 12, 13, 14, 15}))
         with topo[0], topo[1], topo[2]:
             agent = [{'pid': 4242, 'comm': 'node', 'affinity': set(range(24)), 'cpu_fraction': 0.24}]
@@ -762,7 +813,7 @@ class FixtureCampaignTest(unittest.TestCase):
         with (mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}),
               mock.patch.object(record_run, 'online_cpus',
                                 return_value={0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15}),
-              mock.patch.object(record_run.os, 'sched_getaffinity',
+              mock.patch.object(record_run.os, 'sched_getaffinity', create=True,
                                 return_value={0, 1, 2, 3, 12, 13, 14, 15})):
             record = record_run.observer_affinity({'1': '4'})
         self.assertEqual(record['affinity'], '0-3, 12-15')
@@ -775,7 +826,7 @@ class FixtureCampaignTest(unittest.TestCase):
         # refuses.
         with (mock.patch.object(record_run, 'l3_domain', return_value={4, 5}),
               mock.patch.object(record_run, 'online_cpus', return_value={4, 5}),
-              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={99}),
+              mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={99}),
               mock.patch('sys.stderr', new_callable=io.StringIO) as loud):
             record_run.require_observer_off_measured_cpus({'1': '4'})
             self.assertIn('shares them with the measurement', loud.getvalue())
@@ -797,12 +848,13 @@ class FixtureCampaignTest(unittest.TestCase):
               # The CI runner has one L3 domain, so the observing side is empty there and the
               # audit would correctly stand down; give it a side so the gate itself is tested.
               mock.patch.object(record_run, 'observer_cpus', return_value={0, 1}),
-              mock.patch.object(record_run.os, 'sched_getaffinity', return_value={8})):
+              mock.patch.object(record_run.os, 'sched_getaffinity', create=True, return_value={8})):
             with self.assertRaisesRegex(SystemExit, 'observer_audit --observer [0-9,-]+'):
                 record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1',
                                  '--no-publish'], root=self.root)
         self.assertEqual(built, [], 'the build ran before the observing side was checked')
 
+    @unittest.skipUnless(hasattr(os, "sched_setaffinity"), "the observer audit reads Linux /proc affinity")
     def test_the_observer_audit_names_a_process_that_may_run_on_a_measured_core(self):
         # The rule is about masks, not ancestry: a daemon the recorder never spawned, or a
         # leftover of the operator's, is what actually spoiled windows. Two busy children, one
@@ -825,7 +877,11 @@ class FixtureCampaignTest(unittest.TestCase):
             self.assertIn(away.pid, named, "a process allowed on a measured core was not reported")
             self.assertEqual(named[away.pid]['allowed'], str(measured))
             self.assertNotIn(home.pid, named, "a process confined to the observing side was reported")
-            self.assertEqual(foreign, [], "our own children were reported as another user's")
+            # A shared host may have another user's busy process on a measured core;
+            # what must not happen is our own children being reported as foreign.
+            foreign_pids = {entry["pid"] for entry in foreign}
+            self.assertNotIn(away.pid, foreign_pids, "our child was reported as another user's")
+            self.assertNotIn(home.pid, foreign_pids, "our child was reported as another user's")
         finally:
             for child in (away, home):
                 child.kill()
@@ -968,6 +1024,16 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
         self.assertEqual(self._links(self.root / "result/INDEX.md"), [])
         self.assertEqual(len(self._links(self.root / "result/HISTORY.md")), 1)
+
+    def test_an_unpinned_profile_is_marked_in_the_index(self):
+        profiles = self.root / "benchmarks/profiles.yaml"
+        data = yaml.safe_load(profiles.read_text())
+        data["profiles"][0]["pinned"] = False
+        profiles.write_text(yaml.safe_dump(data))
+        self.assertEqual(gen_index.main(["--write"], root=self.root), 0)
+        cells = [line for line in (self.root / "result/INDEX.md").read_text().splitlines()
+                 if line.startswith("| `fixture-kernels`")]
+        self.assertTrue(cells and all("`fixture-cpu` (unpinned)" in line for line in cells), cells)
 
     def _second_profile_run(self):
         """Run A again on a second declared profile, published."""
@@ -1295,6 +1361,13 @@ class CpuSetsTest(unittest.TestCase):
         rowless = {"name": "bare-cpu"}
         with self.assertRaises(SystemExit):
             campaign.cpu_sets_for(self.suite([1], {"zen5-cpu": ["4"]}), rowless, [1])
+
+    def test_an_unpinned_profile_records_a_marker_not_a_borrowed_list(self):
+        mac = descriptor.shared_profile("apple-m4max")
+        for suite in (self.suite([1, 4], ["4", "4-7"]), self.suite([1, 4], {"zen5-cpu": ["4", "4-7"]})):
+            got, source = campaign.cpu_sets_for(suite, mac, [1, 4])
+            self.assertEqual(got, {"1": campaign.UNPINNED, "4": campaign.UNPINNED})
+            self.assertIn("unpinned", source)
 
     def test_a_mapping_is_checked_list_by_list(self):
         campaign.check_cpu_sets(self.suite([1, 4], {"zen5-cpu": ["4", "4-7"]}))
