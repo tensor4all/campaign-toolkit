@@ -25,31 +25,6 @@ def samples(row, repetitions):
     return values
 
 
-def unverified_cells(census, declared):
-    """Timed cells a narrowed verify never checked, with the notes they will carry.
-
-    A family with separately timed variants (`lu`/`cholesky` with an `api-inclusive` row on a
-    vendor-backed engine) emits one timed row per variant at every shape. The census only has the variants
-    of the shapes it checked, so the variants of an unchecked shape are taken from the checked
-    shape of the same (regime, family, dtype, order, batch, row, threads); a cell with no checked
-    sibling carries the empty note. `declared` are base cells (`BASE`), `census` maps full keys
-    (`BASE` plus the note) to their status.
-    """
-    shape = {BASE.index(name) for name in ('m', 'n', 'k')}
-
-    def free(key):
-        return tuple(v for i, v in enumerate(key[:len(BASE)]) if i not in shape)
-
-    notes = {}
-    for key in census:
-        notes.setdefault(free(key), set()).add(key[len(BASE)])
-    out = set()
-    for key in declared:
-        for note in notes.get(free(key)) or {''}:
-            out.add(tuple(key) + (note,))
-    return out
-
-
 def expected_cells(manifest):
     spec = manifest['run_spec']
     expected = set()
@@ -153,16 +128,14 @@ def validate(manifest, run_dir):
             raise ValueError(f'{name}: duplicate or unexpected process group')
         seen_groups.add((repeat, group))
         expected = {key: status for key, status in census.items() if (key[0], key[9]) == group}
-        if grid:
-            # A narrowed verify leaves declared cells unverified - a larger shape of a family that
-            # was checked below it. They are still declared and must appear and succeed; what they
-            # do not get is a status comparison, because there is no verified status for them.
-            # `expected_cells` carries the ten base cells; a census key adds the note, which is
-            # empty for a cell that was never checked.
-            here = unverified_cells(census, [key for key in expected_cells(manifest)
-                                             if (key[0], key[9]) == group])
-            for key in here - set(expected):
-                expected[key] = 'ok'
+        # A narrowed verify leaves declared cells unverified - a larger shape of a family that was
+        # checked below it. They are still declared and must appear and succeed; what they do not
+        # get is a status comparison, because there is no verified status for them. Nor do they
+        # get a note comparison: which separately timed variants a cell emits is the harness's
+        # business, and nothing was checked that could say which notes to expect, so they are
+        # compared on the ten base cells only. Every checked cell keeps its exact census match.
+        unverified = ({key for key in expected_cells(manifest) if (key[0], key[9]) == group}
+                      - bases) if grid else set()
         actual = {}
         order_by_case = {}
         for row in rows:
@@ -191,7 +164,10 @@ def validate(manifest, run_dir):
                     raise ValueError(f'{name}: aggregate is inconsistent with chronological samples')
             elif row.get('samples_ms'):
                 raise ValueError(f'{name}: skipped row carries timing samples')
-        if actual != expected:
+        checked_rows = {key: status for key, status in actual.items() if key[:-1] not in unverified}
+        unverified_rows = {key: status for key, status in actual.items() if key[:-1] in unverified}
+        if (checked_rows != expected or {key[:-1] for key in unverified_rows} != unverified
+                or any(status != 'ok' for status in unverified_rows.values())):
             raise ValueError(f'{name}: missing, unexpected or status-changed timed cells')
         rotation = repeat % len(engines)
         wanted_order = engines[rotation:] + engines[:rotation]

@@ -216,19 +216,72 @@ class TimingEvidenceTest(unittest.TestCase):
             self.validate(manifest)
 
 
-class UnverifiedCellsTest(unittest.TestCase):
-    def test_a_narrowed_verify_carries_the_variant_rows_of_the_checked_shape(self):
-        from campaign_toolkit import timing_evidence as te
-        def key(family, n, row, note=''):
-            return ('r', family, 'f64', 'f', n, n, '', '1', row, '16') + (note,)
-        census = {key('lu', '4096', 'faer-fork'): 'ok', key('lu', '4096', 'faer-fork', 'api-inclusive'): 'ok',
-                  key('lu', '4096', 'lapack-openblas'): 'ok'}
-        declared = [key('lu', n, row)[:-1] for n in ('4096', '8192') for row in ('faer-fork', 'lapack-openblas')]
-        got = te.unverified_cells(census, declared)
-        self.assertIn(key('lu', '8192', 'faer-fork', 'api-inclusive'), got)
-        self.assertIn(key('lu', '8192', 'faer-fork'), got)
-        self.assertIn(key('lu', '8192', 'lapack-openblas'), got)
-        self.assertNotIn(key('lu', '8192', 'lapack-openblas', 'api-inclusive'), got)
-        # a cell with no checked sibling keeps the empty note
-        self.assertEqual(te.unverified_cells({}, [key('qr', '8192', 'faer-fork')[:-1]]),
-                         {key('qr', '8192', 'faer-fork')})
+    def narrowed(self, family, checked_notes, unchecked_notes):
+        """A run whose verify is narrowed to n=2 while n=4 is timed too.
+
+        `checked_notes` are the notes every engine's n=2 row carries, in the census and in the
+        timing files; `unchecked_notes` are the notes the timing files carry at the unverified n=4.
+        """
+        manifest = copy.deepcopy(self.manifest)
+        manifest['run_spec']['populations'][0].update(families=[family], n=['2', '4'])
+        manifest['verification'] = {'grid': {'n': ['2']}}
+
+        def row(n, engine, note, **extra):
+            return (dict(zip(timing_evidence.BASE,
+                             ('small', family, 'f64', 'c', n, n, '', '1', engine, '1')))
+                    | {'note': note, 'status': 'ok', 'samples_ms': '', 'total_ms': '',
+                       'per_item_us': '', 'rayon_threads': '1', 'vendor_threads': '1'} | extra)
+
+        self.write('verify-small-1t.csv',
+                   [row('2', engine, note) for engine in self.engines for note in checked_notes])
+        for repeat, name in enumerate(manifest['result_files']):
+            order = self.engines[repeat:] + self.engines[:repeat]
+            timed = {'samples_ms': json.dumps([1 + repeat, 3 + repeat]),
+                     'total_ms': str(2 + repeat), 'per_item_us': str((2 + repeat) * 1000)}
+            self.write(name, [row(n, engine, note, **timed)
+                              for n, notes in (('2', checked_notes), ('4', unchecked_notes))
+                              for engine in order for note in notes])
+        return manifest
+
+    def test_an_unverified_shape_is_compared_on_its_base_cell_not_on_a_guessed_note(self):
+        # The checked n=2 emits a plain and an `api-inclusive` row; the unchecked n=4 emitting only
+        # the plain row is still a complete run. Copying the checked shape's notes onto n=4 would
+        # refuse it as "missing" - nothing was verified at n=4 that could say which notes to expect.
+        self.validate(self.narrowed('lu', ['', 'api-inclusive'], ['']))
+
+    def test_an_unverified_shape_may_carry_separately_timed_variants(self):
+        # The opposite direction: the unchecked shape carries variant rows. Expecting only an
+        # empty note there (the rule before the census learned about notes) refused a finished run.
+        self.validate(self.narrowed('lu', ['', 'api-inclusive'], ['', 'api-inclusive']))
+        self.validate(self.narrowed('mul', ['block', 'sequence'], ['block', 'sequence']))
+
+    def test_an_unverified_shape_must_still_appear_and_succeed(self):
+        manifest = self.narrowed('lu', [''], [''])
+        self.validate(manifest)
+        name = 'run0-small-1t.csv'
+        original = self.rows(name)
+        missing = [r for r in original if not (r['n'] == '4' and r['row'] == 'vendor')]
+        skipped = [r | ({'status': 'skipped', 'samples_ms': '', 'total_ms': '', 'per_item_us': ''}
+                        if r['n'] == '4' and r['row'] == 'vendor' else {}) for r in original]
+        for label, rows in (('missing', missing), ('skipped', skipped)):
+            with self.subTest(label):
+                self.write(name, rows)
+                with self.assertRaisesRegex(ValueError, 'missing, unexpected or status-changed'):
+                    self.validate(manifest)
+        self.write(name, original)
+        self.validate(manifest)
+
+    def test_a_checked_shape_still_matches_its_census_exactly(self):
+        # Only the shapes the census never saw are compared on the base cell: a checked shape that
+        # drops a verified variant, or adds one nothing verified, is still refused.
+        manifest = self.narrowed('lu', ['', 'api-inclusive'], [''])
+        name = 'run0-small-1t.csv'
+        original = self.rows(name)
+        dropped = [r for r in original if not (r['n'] == '2' and r['note'] == 'api-inclusive'
+                                               and r['row'] == 'candidate')]
+        added = original + [original[0] | {'note': 'extra'}]
+        for label, rows in (('dropped', dropped), ('added', added)):
+            with self.subTest(label):
+                self.write(name, rows)
+                with self.assertRaisesRegex(ValueError, 'missing, unexpected or status-changed'):
+                    self.validate(manifest)

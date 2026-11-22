@@ -775,6 +775,60 @@ class FixtureCampaignTest(unittest.TestCase):
             observer = next(v for k, v in _walk(schema) if k == 'observer' and 'free_cpus' in v.get('properties', {}))
             self.assertIn('caveat', observer['properties'])   # the manifest schema admits what the recorder writes
 
+    def test_a_whole_node_row_records_and_renders_the_observer_caveat(self):
+        # Through main(), with the fixture profile whose only row takes every online CPU and declares
+        # `observer: ""` (an SMT-off node measured whole): the recorder must pass the observer gate
+        # with a warning instead of the refusal an undeclared row gets, record the caveat, and the
+        # page must print it - without it the page reads exactly like a properly split run's.
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+        suite = self.root / SUITE_REL
+        text = suite.read_text()
+        self.assertIn('cpu_sets: ["0"]', text)
+        suite.write_text(text.replace('cpu_sets: ["0"]', 'cpu_sets:\n      fixture-cpu: ["0"]')
+                         .replace('optional_profiles: []', 'optional_profiles:\n  - fixture-cpu-whole'))
+
+        def process(args, **kwargs):
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
+
+        with contextlib.ExitStack() as stack:
+            for p in self._record_patches(original, pin):
+                stack.enter_context(p)
+            # the whole node: CPU 0 is online, measured, its own L3 domain, and the recorder's affinity
+            stack.enter_context(mock.patch.object(record_run, 'online_cpus', return_value={0}))
+            stack.enter_context(mock.patch.object(record_run, 'l3_domain', return_value={0}))
+            stack.enter_context(mock.patch.object(record_run.os, 'sched_getaffinity', create=True,
+                                                  return_value={0}))
+            stack.enter_context(mock.patch.object(record_run.subprocess, 'run', side_effect=process))
+            stack.enter_context(mock.patch.object(descriptor, 'run_module',
+                                                  return_value=subprocess.CompletedProcess([], 0, '', '')))
+            err = stack.enter_context(mock.patch('sys.stderr', new_callable=io.StringIO))
+            code = record_run.main(['fixture-cpu-whole', 'fixture-kernels', '--threads', '1',
+                                    '--label', 'whole', '--allow-local-commits'], root=self.root)
+        self.assertEqual(code, 0)
+        self.assertIn('cpu sets from the thread_rows of fixture-cpu-whole', err.getvalue())
+        self.assertIn('observer unavailable for the 1T row', err.getvalue())
+        run = sorted((self.root / 'data/results/fixture-cpu-whole/fixture-kernels').glob('*-whole'))[-1]
+        manifest = campaign.load(run / 'run.yaml')
+        self.assertIn('observer unavailable', manifest['threads']['observer']['caveat'])
+        self.assertEqual(validate_run.validate(str(run / 'run.yaml')), [])
+        self.assertEqual(report_run.main(['--run-dir', str(run)], root=self.root), 0)
+        report = (run / 'report.md').read_text()
+        self.assertIn('- observer: **unavailable** (observer unavailable: no CPU lies outside', report)
+        self.assertIn('the observer audit was not run', report)
+        guards = next(line for line in report.splitlines() if line.startswith('- guards:'))
+        self.assertIn('idle window', guards)          # the gate did run (pinned.sh), so it is stated
+        self.assertIn('sampled on the measured cores the recorder shares', guards)
+        # A run with an observer side prints neither.
+        self.assertEqual(report_run.main(['--run-dir', str(self.root / RUN_A_REL)], root=self.root), 0)
+        split = (self.root / RUN_A_REL / 'report.md').read_text()
+        self.assertNotIn('observer: **unavailable**', split)
+        self.assertNotIn('the recorder shares', split)
+
     def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
             with mock.patch('sys.stderr', new_callable=io.StringIO) as quiet:

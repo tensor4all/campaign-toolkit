@@ -289,6 +289,11 @@ def render(manifest, suite, rows, run_dir):
         from .timing_evidence import validate
         validate(manifest, run_dir)
     best, skipped, within, series = best_per_case(rows, manifest['timing_policy'])
+    # A run with no CPU outside the measured L3 domains (a node measured whole, or a host with a
+    # single L3 domain) was recorded from the measured cores themselves. Its idle gate still ran,
+    # but it sampled cores the recorder shares, and the observer audit had no side to audit, so
+    # the page has to say so or its lines read exactly like a properly split run's.
+    caveat = (manifest["threads"].get("observer") or {}).get("caveat")
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
@@ -317,6 +322,10 @@ def render(manifest, suite, rows, run_dir):
         *(["- CPU affinity: **unpinned** (the profile declares `pinned: false`): no CPU set, observer "
            "split or idle gate applied, so compare these cells only with other runs of this profile, "
            "never with a pinned profile's"] if manifest["threads"].get("pinned") is False else []),
+        *([f"- observer: **unavailable** ({caveat}): the recorder and the harness driver ran on the "
+           f"measured cores, recorder affinity `{manifest['threads']['observer'].get('affinity') or '-'}`; "
+           f"the observer audit was not run, so compare these cells only with runs recorded the "
+           f"same way"] if caveat else []),
         f"- timestamp: `{manifest['timestamp']}`",
         f"- timing policy: v{manifest['timing_policy']['version']}, "
         f"{manifest['timing_policy']['statistic']} of {manifest['timing_policy']['repetitions']} reps, "
@@ -324,7 +333,10 @@ def render(manifest, suite, rows, run_dir):
         f"(time-based, identical on every row)",
         (f"- guards: idle window {manifest['guards']['idle_window_seconds']} s, "
          f"max busy {manifest['guards']['max_busy_percent']}% including SMT siblings, "
-         f"{manifest['guards']['attempts']} attempts" if 'idle_window_seconds' in manifest['guards']
+         f"{manifest['guards']['attempts']} attempts"
+         + ("; sampled on the measured cores the recorder shares, so the gate cannot tell the "
+            "recorder's own load from foreign load" if caveat else "")
+         if 'idle_window_seconds' in manifest['guards']
          else "- guards: none, no idle gate applied"),
         f"- command: `{manifest['command']}`",
         f"- raw data: `{run_dir.relative_to(d.root)}/`",

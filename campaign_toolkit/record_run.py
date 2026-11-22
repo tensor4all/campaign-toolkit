@@ -126,6 +126,8 @@ def observer_affinity(cpu_sets):
     record = {"affinity": format_cpu_list(mine), "free_cpus": format_cpu_list(free_cpus),
               "source": "os.sched_getaffinity(0) in the recording process"}
     if not free_cpus:
+        # Read by `report_run`, which prints it on the page: without it a run recorded from the
+        # measured cores themselves is indistinguishable from a properly split one.
         record["caveat"] = "observer unavailable: no CPU lies outside the measured L3 domains"
     return record
 
@@ -240,8 +242,10 @@ def require_observer_off_measured_cpus(cpu_sets, unobserved=()):
 
     `unobserved` lists thread rows the profile declares with no observer CPU, measured on every
     online CPU. For those rows no pin can exist, so the refusal becomes a recorded warning
-    ("observer unavailable"): the recorder and the driver share the measured cores, and the page
-    must say so.
+    ("observer unavailable"): the recorder and the driver share the measured cores.
+    `observer_affinity` writes that as `threads.observer.caveat`, and `report_run` prints it on the
+    page together with a qualified guards line (the idle gate still runs, but on cores the recorder
+    shares), so the page cannot be read as a properly split run.
 
     Keeping unrelated work off the measured cores is an operator precondition, not something the
     idle guard can repair after the fact: this process is the observer, its children inherit its
@@ -262,7 +266,7 @@ def require_observer_off_measured_cpus(cpu_sets, unobserved=()):
         print(f"warning: observer unavailable for the {', '.join(unobserved)}T row(s): the profile "
               f"declares no observer CPU and every online CPU is measured, so the recorder and the "
               f"driver share the measured cores; the residual contention is recorded in the "
-              f"manifest's observer block, not removed", file=sys.stderr)
+              f"manifest's observer block and printed on the page, not removed", file=sys.stderr)
         return
     if shared:
         free = ", ".join(f"{low}" if high == low else f"{low}-{high}"

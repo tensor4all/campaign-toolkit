@@ -7,3 +7,16 @@ profiles:
     cpu: Fixture CPU
     logical_cpus: 8
     l3: "0-7: 8 MiB shared"
+  - name: fixture-cpu-whole
+    description: >-
+      A synthetic SMT-off node measured whole: its only thread row takes every
+      online CPU, so the row declares no observer CPU (`observer: ""`). It
+      exists so the observer-unavailable path of the recorder and the page is
+      exercised; no suite lists it, a test adds it.
+    cpu: Fixture CPU
+    logical_cpus: 1
+    l3: "0: 1 MiB"
+    thread_rows:
+      - threads: 1
+        measured: "0"
+        observer: ""
