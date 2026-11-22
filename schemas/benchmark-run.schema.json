@@ -478,6 +478,10 @@
             },
             "source": {
               "type": "string"
+            },
+            "caveat": {
+              "type": "string",
+              "description": "Present when no CPU lies outside the measured L3 domains (`observer unavailable`): the recorder and the driver share the measured cores."
             }
           }
         },

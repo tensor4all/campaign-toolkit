@@ -46,6 +46,16 @@ def git(cwd, *args, **env):
                           capture_output=True, text=True).stdout.strip()
 
 
+def _walk(node):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield k, v
+            yield from _walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _walk(v)
+
+
 class FixtureCampaignTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -742,6 +752,111 @@ class FixtureCampaignTest(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
                     record_run.require_observer_off_measured_cpus({'1': '4'})
 
+    def test_a_declared_unobserved_row_warns_instead_of_refusing(self):
+        # An SMT-off node measured whole has no CPU outside the measured domains. Only a profile that
+        # declares `observer: ""` for that row relaxes the refusal; an undeclared row keeps it.
+        online = set(range(8))
+        profile = {'thread_rows': [{'threads': 8, 'measured': '0-7', 'observer': ''},
+                                   {'threads': 4, 'measured': '0-3', 'observer': '4-7'}]}
+        with (mock.patch.object(record_run, 'l3_domain', side_effect=lambda cpu: {0, 1, 2, 3} if cpu < 4 else {4, 5, 6, 7}),
+              mock.patch.object(record_run, 'online_cpus', return_value=online),
+              mock.patch.object(record_run.os, 'sched_getaffinity', return_value=online, create=True)):
+            self.assertEqual(record_run.unobserved_rows(profile, {'8': '0-7'}), ['8'])
+            self.assertEqual(record_run.unobserved_rows(profile, {'4': '0-3'}), [])
+            self.assertEqual(record_run.unobserved_rows({'thread_rows': [{'threads': 8, 'measured': '0-7', 'observer': '0'}]},
+                                                        {'8': '0-7'}), [])
+            with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+                record_run.require_observer_off_measured_cpus({'8': '0-7'}, unobserved=['8'])
+                self.assertIn('observer unavailable', err.getvalue())
+            with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
+                record_run.require_observer_off_measured_cpus({'8': '0-7'})   # undeclared: refused
+            self.assertIn('observer unavailable', record_run.observer_affinity({'8': '0-7'})['caveat'])
+            schema = json.loads((descriptor.schemas_dir() / 'benchmark-run.schema.json').read_text())
+            observer = next(v for k, v in _walk(schema) if k == 'observer' and 'free_cpus' in v.get('properties', {}))
+            self.assertIn('caveat', observer['properties'])   # the manifest schema admits what the recorder writes
+
+    def test_a_whole_node_row_records_and_renders_the_observer_caveat(self):
+        # Through main(), with the fixture profile whose only row takes every online CPU and declares
+        # `observer: ""` (an SMT-off node measured whole): the recorder must pass the observer gate
+        # with a warning instead of the refusal an undeclared row gets, record the caveat, and the
+        # page must print it - without it the page reads exactly like a properly split run's.
+        original = campaign.load(self.root / RUN_A_REL / 'run.yaml')
+        source_csv = self.root / RUN_A_REL / original['result_files'][0]
+        pin = {'FIXTURE_REV': original['library']['commit'], 'FIXTURE_DIRTY': 'false',
+               'FIXTURE_DIR': str(self.checkout), 'BUILD_FEATURES': '', 'BIN_DIR': str(self.root)}
+        suite = self.root / SUITE_REL
+        text = suite.read_text()
+        self.assertIn('cpu_sets: ["0"]', text)
+        suite.write_text(text.replace('cpu_sets: ["0"]', 'cpu_sets:\n      fixture-cpu: ["0"]')
+                         .replace('optional_profiles: []', 'optional_profiles:\n  - fixture-cpu-whole'))
+
+        def process(args, **kwargs):
+            if '--csv' in args:
+                shutil.copyfile(source_csv, args[args.index('--csv') + 1])
+            return subprocess.CompletedProcess(args, 0, stdout='all comparisons within tolerance', stderr='')
+
+        with contextlib.ExitStack() as stack:
+            for p in self._record_patches(original, pin):
+                stack.enter_context(p)
+            # the whole node: CPU 0 is online, measured, its own L3 domain, and the recorder's affinity
+            stack.enter_context(mock.patch.object(record_run, 'online_cpus', return_value={0}))
+            stack.enter_context(mock.patch.object(record_run, 'l3_domain', return_value={0}))
+            stack.enter_context(mock.patch.object(record_run.os, 'sched_getaffinity', create=True,
+                                                  return_value={0}))
+            stack.enter_context(mock.patch.object(record_run.subprocess, 'run', side_effect=process))
+            stack.enter_context(mock.patch.object(descriptor, 'run_module',
+                                                  return_value=subprocess.CompletedProcess([], 0, '', '')))
+            err = stack.enter_context(mock.patch('sys.stderr', new_callable=io.StringIO))
+            # the same whole node under a profile that declares no thread_rows is still refused
+            with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
+                record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1',
+                                 '--label', 'undeclared', '--allow-local-commits'], root=self.root)
+            code = record_run.main(['fixture-cpu-whole', 'fixture-kernels', '--threads', '1',
+                                    '--label', 'whole', '--allow-local-commits'], root=self.root)
+        self.assertEqual(code, 0)
+        self.assertIn('cpu sets from the thread_rows of fixture-cpu-whole', err.getvalue())
+        self.assertIn('observer unavailable for the 1T row', err.getvalue())
+        run = sorted((self.root / 'data/results/fixture-cpu-whole/fixture-kernels').glob('*-whole'))[-1]
+        manifest = campaign.load(run / 'run.yaml')
+        self.assertIn('observer unavailable', manifest['threads']['observer']['caveat'])
+        self.assertEqual(validate_run.validate(str(run / 'run.yaml')), [])
+        self.assertEqual(report_run.main(['--run-dir', str(run)], root=self.root), 0)
+        report = (run / 'report.md').read_text()
+        self.assertIn('- observer: **unavailable** (observer unavailable: no CPU lies outside', report)
+        self.assertIn('the observer audit was not run', report)
+        guards = next(line for line in report.splitlines() if line.startswith('- guards:'))
+        self.assertIn('idle window', guards)          # the gate did run (pinned.sh), so it is stated
+        self.assertIn('sampled on the measured cores the recorder shares', guards)
+        # A run with an observer side prints neither.
+        self.assertEqual(report_run.main(['--run-dir', str(self.root / RUN_A_REL)], root=self.root), 0)
+        split = (self.root / RUN_A_REL / 'report.md').read_text()
+        self.assertNotIn('observer: **unavailable**', split)
+        self.assertNotIn('the recorder shares', split)
+
+    def test_a_narrowed_verify_is_stated_on_a_v1_page(self):
+        # The v1 verify note says every row passed verify "on the same grid"; a run that narrowed
+        # the verify must not be published under that sentence alone.
+        run = self.root / RUN_A_REL
+        manifest = yaml.safe_load((run / 'run.yaml').read_text())
+        manifest['verification'] = {'grid': {'n': [4]}}
+        (run / 'run.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
+        self.assertEqual(report_run.main(['--run-dir', str(run)], root=self.root), 0)
+        report = (run / 'report.md').read_text()
+        self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 4 were verified',
+                      report)
+        self.assertNotIn('on the same grid', report)      # the full-grid claim is not left standing
+        self.assertIn('Every row below at a verified shape passed `fixturebench verify`', report)
+        self.assertNotIn('had to succeed', report)        # v1 evidence admits skipped rows
+        self.assertLess(report.index('Verification was narrowed'), report.index('Every row below'))
+        # A grid naming every declared shape narrows nothing and changes nothing on the page.
+        manifest['verification'] = {'grid': {'n': sorted({n for pop in manifest['run_spec']['populations']
+                                                           for n in pop['n']})}}
+        (run / 'run.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
+        self.assertEqual(report_run.main(['--run-dir', str(run)], root=self.root), 0)
+        report = (run / 'report.md').read_text()
+        self.assertNotIn('Verification was narrowed', report)
+        self.assertIn('passed `fixturebench verify` on the same grid', report)
+
     def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
             with mock.patch('sys.stderr', new_callable=io.StringIO) as quiet:
@@ -786,6 +901,7 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertEqual(record['affinity'], '0-3, 12-15')
         self.assertEqual(record['free_cpus'], '0-3, 12-15')   # nothing outside the domain is left out
         self.assertIn('sched_getaffinity', record['source'])
+        self.assertNotIn('caveat', record)    # a split run is never published as observer-unavailable
 
     def test_single_l3_domain_host_warns_instead_of_refusing(self):
         # A small CI runner has one L3 domain: nothing can be parked off the measured cache there,

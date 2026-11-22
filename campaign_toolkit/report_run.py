@@ -2,7 +2,9 @@
 """Turn one run's harness CSVs into the tracked report for a (profile, suite) cell.
 
 Only the numbers that came from a verified run are published: every row here was
-gated by the harness's verify pass before the timing pass started. The report
+gated by the harness's verify pass before the timing pass started. A run whose verify was
+narrowed to some shapes (`verification.grid`) says so above its tables, and which shapes the
+pass covered. The report
 repeats the run's provenance in its own header, because a table that is copied
 into a discussion without its commit is the thing this repository exists to stop.
 """
@@ -289,6 +291,36 @@ def render(manifest, suite, rows, run_dir):
         from .timing_evidence import validate
         validate(manifest, run_dir)
     best, skipped, within, series = best_per_case(rows, manifest['timing_policy'])
+    # A run with no CPU outside the measured L3 domains (a node measured whole, or a host with a
+    # single L3 domain) was recorded from the measured cores themselves. Its idle gate still ran,
+    # but it sampled cores the recorder shares, and the observer audit had no side to audit, so
+    # the page has to say so or its lines read exactly like a properly split run's.
+    caveat = (manifest["threads"].get("observer") or {}).get("caveat")
+    # A suite may narrow the shapes its verify runs on (`verification.grid`); the larger declared
+    # shapes are then timed without being verified, and the page must say what was checked
+    # instead of implying it checked everything (docs/cross-implementation-verification.md).
+    # A `verify:` block that names every declared shape narrows nothing, so it is checked against
+    # the populations, the way the recorder and `timing_evidence` apply it: a population the grid
+    # names is narrowed to the named shapes, one it does not name keeps all of its own.
+    grid_n = list(dict.fromkeys(str(v) for v in ((manifest.get("verification") or {}).get("grid")
+                                                 or {}).get("n", [])))    # declared order, no sort
+    narrowed_n = grid_n if any(
+        {str(n) for n in pop["n"]} & set(grid_n) and not {str(n) for n in pop["n"]} <= set(grid_n)
+        for pop in manifest["run_spec"]["populations"]) else []
+    # Only v2 evidence refuses a skipped unverified cell (`timing_evidence.validate`); a v1 page
+    # cannot claim that those cells succeeded.
+    narrowed_note = ([f"Verification was narrowed (`verification.grid`): only the shapes n = "
+                      f"{', '.join(narrowed_n)} were verified. Cells at the other declared shapes of "
+                      f"those populations were timed"
+                      + (" and had to succeed" if v2 else "")
+                      + ", but no verification checked them; a population the grid does not name "
+                      "was verified at every shape."] if narrowed_n else [])
+    verify_note = d.verify_note().replace("{binary}", d.measured["binary"])
+    if narrowed_n:
+        # The campaign's note describes the pass; on a narrowed run its "every row ... on the same
+        # grid" opening would contradict the line above it, so it is scoped to the verified shapes.
+        verify_note = (verify_note.replace("Every row below passed", "Every row below at a verified shape passed")
+                       .replace(" on the same grid", "").replace("\non the same grid", "\n"))
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
@@ -317,6 +349,10 @@ def render(manifest, suite, rows, run_dir):
         *(["- CPU affinity: **unpinned** (the profile declares `pinned: false`): no CPU set, observer "
            "split or idle gate applied, so compare these cells only with other runs of this profile, "
            "never with a pinned profile's"] if manifest["threads"].get("pinned") is False else []),
+        *([f"- observer: **unavailable** ({caveat}): the recorder and the harness driver ran on the "
+           f"measured cores, recorder affinity `{manifest['threads']['observer'].get('affinity') or '-'}`; "
+           f"the observer audit was not run, so compare these cells only with runs recorded the "
+           f"same way"] if caveat else []),
         f"- timestamp: `{manifest['timestamp']}`",
         f"- timing policy: v{manifest['timing_policy']['version']}, "
         f"{manifest['timing_policy']['statistic']} of {manifest['timing_policy']['repetitions']} reps, "
@@ -324,7 +360,10 @@ def render(manifest, suite, rows, run_dir):
         f"(time-based, identical on every row)",
         (f"- guards: idle window {manifest['guards']['idle_window_seconds']} s, "
          f"max busy {manifest['guards']['max_busy_percent']}% including SMT siblings, "
-         f"{manifest['guards']['attempts']} attempts" if 'idle_window_seconds' in manifest['guards']
+         f"{manifest['guards']['attempts']} attempts"
+         + ("; sampled on the measured cores the recorder shares, so the gate cannot tell the "
+            "recorder's own load from foreign load" if caveat else "")
+         if 'idle_window_seconds' in manifest['guards']
          else "- guards: none, no idle gate applied"),
         f"- command: `{manifest['command']}`",
         f"- raw data: `{run_dir.relative_to(d.root)}/`",
@@ -380,8 +419,11 @@ def render(manifest, suite, rows, run_dir):
                                    for t, c in sorted(manifest["threads"]["cpu_sets"].items(),
                                                       key=lambda kv: int(kv[0]))),
         "",
-        *(d.verify_note().replace("{binary}", d.measured["binary"]).splitlines() if not v2 else [
-            'Every timed cell matches a successful verification census, including operation variants.',
+        *(narrowed_note + [""] * bool(narrowed_note) + verify_note.splitlines() if not v2 else [
+            ('Every verified cell matches a successful verification census, including operation '
+             'variants.' if narrowed_n else
+             'Every timed cell matches a successful verification census, including operation variants.'),
+            *narrowed_note,
             'Each cell is median of process medians ± sample SD of those medians; W is the median',
             'within-process sample SD. All values are milliseconds. These are descriptive spreads,',
             'not confidence intervals. The between-process spread includes the rotating-order schedule.',
