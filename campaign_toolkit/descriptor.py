@@ -168,7 +168,7 @@ class Descriptor:
     # ---- historical names -----------------------------------------------
     @property
     def aliases(self) -> dict:
-        """`{"suites": {old: new}, "engines": {old: new}}`: names a campaign has renamed.
+        """`{"suites", "engines", "suite_sha256", "report"}`: what a campaign renamed, old -> new.
 
         A recording is never rewritten, so a run recorded before a rename keeps the names it was
         recorded under -- its directory, its manifest, its CSV rows and its report. The readers
@@ -179,7 +179,8 @@ class Descriptor:
         declared = self.data.get("aliases") or {}
         return {"suites": dict(declared.get("suites") or {}),
                 "engines": dict(declared.get("engines") or {}),
-                "suite_sha256": dict(declared.get("suite_sha256") or {})}
+                "suite_sha256": dict(declared.get("suite_sha256") or {}),
+                "report": dict(declared.get("report") or {})}
 
     def canonical_suite_sha(self, sha: "str | None") -> "str | None":
         """The declaration hash a recorded `suite_sha256` stands for after a rename.

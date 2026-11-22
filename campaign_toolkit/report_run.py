@@ -270,6 +270,12 @@ def render(manifest, suite, rows, run_dir):
     d = descriptor.current()
     axes = report_axes(rows, manifest['timing_policy'])
     report = d.report
+    # A run recorded under historical names printed the labels of its time: `aliases.report`
+    # overrides `report` fields for it, so its report regenerates as it was written.
+    recorded_engines = manifest.get("run_spec", {}).get("engines", [])
+    if (manifest.get("suite_id") in d.aliases["suites"]
+            or any(e in d.aliases["engines"] for e in recorded_engines)):
+        report = {**report, **d.aliases["report"]}
     vendor = manifest.get("vendor") or {}
     library = manifest["library"]
     upstream = manifest.get("upstream") or {}

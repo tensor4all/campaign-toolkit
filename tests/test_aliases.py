@@ -46,6 +46,8 @@ class AliasedCampaignTest(unittest.TestCase):
     def rename(self):
         suites = self.root / "benchmarks/suites"
         old = suites / "fixture-kernels.yaml"
+        self.old_suite = old.read_text()
+        self.old_descriptor = (self.root / "benchmarks/campaign.yaml").read_text()
         text = old.read_text().replace("algo-lane", "algo-line")
         data = yaml.safe_load(text)
         assert data["id"] == "fixture-kernels"
@@ -132,16 +134,48 @@ class AliasedCampaignTest(unittest.TestCase):
         pages, _missing = site.current_pages(site_root, [])
         self.assertEqual(len([p for p in pages if p.parent.parent.name == "fixture-cpu"]), 1)
 
-    def test_a_run_under_the_historical_suite_id_is_kept_as_recorded(self):
+    def test_an_old_run_regenerates_from_the_declaration_it_recorded(self):
         from campaign_toolkit import check_generated
-        # The rename changes the declaration's prose; the old report must not be regenerated
-        # against it (it would always differ), and its page is still compared with it.
+        # The campaign as a repository: the pre-rename declaration is committed, then renamed and its
+        # prose edited (as colmat-benchmark#113 did). The old run's report printed the old prose, so
+        # it regenerates only from the old file, which check_generated reads back from git.
         suite = self.root / "benchmarks/suites/fixture-core.yaml"
-        suite.write_text(suite.read_text().replace("The overhead baseline.", "The overhead baseline (renamed)."))
-        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-            code = check_generated.main(["--all", "--no-index"], root=self.root)
-        self.assertEqual(code, 0, out.getvalue())
-        self.assertIn("kept as recorded, not regenerated", err.getvalue())
+        renamed = suite.read_text()
+        suite.unlink()
+        (self.root / "benchmarks/suites/fixture-kernels.yaml").write_text(self.old_suite)
+        desc = self.root / "benchmarks/campaign.yaml"
+        renamed_desc = desc.read_text()
+        desc.write_text(self.old_descriptor)
+        test_toolkit.git(self.root, "init", "-q")
+        test_toolkit.git(self.root, "add", "-A")
+        test_toolkit.git(self.root, "commit", "-qm", "before the rename")
+        (self.root / "benchmarks/suites/fixture-kernels.yaml").unlink()
+        suite.write_text(renamed.replace("The overhead baseline.", "The overhead baseline (renamed)."))
+        # the rename also rewords a report label; old runs print the old one (aliases.report)
+        data = yaml.safe_load(renamed_desc)
+        old_label = data["report"]["provider_label"]
+        data["report"]["provider_label"] = old_label + " (renamed)"
+        data["aliases"]["report"] = {"provider_label": old_label}
+        desc.write_text(yaml.safe_dump(data, sort_keys=False))
+        test_toolkit.git(self.root, "add", "-A")
+        test_toolkit.git(self.root, "commit", "-qm", "rename")
+        descriptor.set_root(self.root)
+
+        def run():
+            with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+                code = check_generated.main(["--all", "--no-index"], root=self.root)
+            return code, out.getvalue()
+
+        code, out = run()
+        self.assertEqual(code, 0, out)
+        # and the numbers are still checked: an edited timing no longer regenerates the report
+        csv_path = next((self.root / RUN_A_REL).glob("run0-*.csv"))
+        lines = csv_path.read_text().splitlines()
+        lines[1] = lines[1].replace("0.4000", "0.9000")
+        csv_path.write_text("\n".join(lines) + "\n")
+        code, out = run()
+        self.assertEqual(code, 1)
+        self.assertIn("differs from what report_run writes from its CSVs", out)
 
     def test_chart_cells_from_old_rows_are_keyed_by_the_current_engine(self):
         import test_candidate

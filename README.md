@@ -277,7 +277,13 @@ aliases:
   suites: {faer-kernels: colmat-kernels}     # historical suite id -> current id (a suites_dir file)
   engines: {faer-fork: colmat}               # historical engine/provider name -> a key of engines
   suite_sha256: {<recorded sha>: <sha of the renamed file>}   # only when the rename changed names only
+  report: {provider_label: faer rows}        # report labels as a pre-rename run printed them
 ```
+
+`check_generated` renders a changed run against the declaration it recorded, read back from git by
+its `suite_sha256` (the renamed or edited file is not what its report printed), and with the
+`aliases.report` labels when the run was recorded under historical names, so an old run's
+report still regenerates byte for byte and its numbers stay checked.
 
 A rename rewrites the suite file, so without `suite_sha256` every run recorded under the old file
 reads as measured under another declaration: the validator skips its declaration-derived checks and

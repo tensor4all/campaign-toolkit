@@ -275,6 +275,11 @@
           "description": "Recorded suite_sha256 -> sha256 of the file a names-only rename produced. Holds only while that file is unchanged.",
           "type": "object",
           "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "report": {
+          "description": "`report` fields as they were before the rename; a run recorded under a historical suite or engine name prints these, so its report regenerates as written.",
+          "type": "object",
+          "additionalProperties": {"type": "string"}
         }
       }
     },
