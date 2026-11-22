@@ -51,6 +51,9 @@ def points(cells, threads, family, engine, coefficient, complex_dtype=False):
     # modes), and plotting both makes a vertical stack at one x. Prefer the
     # plain row; the api-inclusive row is the fallback for vendor rows only.
     chosen = {}
+    # The cells are keyed by current engine names (`load_run`); a config naming a historical
+    # engine draws the same line rather than an empty one.
+    engine = descriptor.canonical_engine(engine)
     for (t, f, size, note, row), medians in sorted(cells.items()):
         if t != threads or f != family or row != engine or note not in PLOTTABLE_NOTES:
             continue

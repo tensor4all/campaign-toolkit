@@ -74,6 +74,22 @@ class AliasedCampaignTest(unittest.TestCase):
         self.assertTrue(any("no-such-suite" in p for p in problems), problems)
         self.assertTrue(any("'algo-pool' is both" in p for p in problems), problems)
 
+    def test_a_suite_still_listing_the_historical_engine_is_accepted(self):
+        suite = self.root / "benchmarks/suites/fixture-core.yaml"
+        data = yaml.safe_load(suite.read_text())
+        data["runs"][0]["engines"] = ["algo-lane" if e == "algo-line" else e for e in data["runs"][0]["engines"]]
+        suite.write_text(yaml.safe_dump(data, sort_keys=False))
+        self.assertEqual(declarations.check(self.root, out=io.StringIO()), [])
+
+    def test_a_chart_series_naming_the_historical_engine_draws(self):
+        from campaign_toolkit import throughput
+        # `load_run` keys cells by the current engine name; a series config written under the
+        # historical name must draw that line, not an empty one.
+        cells = {(1, "mul", 64, "", "algo-line"): {"run0": 1.0, "run1": 1.1}}
+        line = throughput.points(cells, 1, "mul", "algo-line", 2.0)
+        self.assertEqual(len(line), 1)
+        self.assertEqual(throughput.points(cells, 1, "mul", "algo-lane", 2.0), line)
+
     def test_lookups_accept_either_name(self):
         d = descriptor.current()
         self.assertEqual(d.suite_path("fixture-kernels").name, "fixture-core.yaml")

@@ -118,7 +118,8 @@ def check(root, out=None) -> list:
                 # A suite still written under a historical engine name declares the current engine.
                 if engine not in engines and d.canonical_engine(engine) not in engines:
                     problems.append(f"{path}: engine {engine!r} is not declared by the descriptor")
-                elif engine not in suite["engines_doc"]:
+                elif (engine not in suite["engines_doc"]
+                      and d.canonical_engine(engine) not in suite["engines_doc"]):
                     problems.append(f"{path}: engine {engine!r} has no engines_doc entry")
         if suite["id"] in d.aliases["suites"]:
             problems.append(f"{path}: suite id {suite['id']!r} is also a historical name "

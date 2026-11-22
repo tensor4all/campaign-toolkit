@@ -53,15 +53,6 @@ def canonical_engines(engines) -> list:
     return [desc().canonical_engine(e) for e in engines]
 
 
-def canonical_row(row: dict) -> dict:
-    """A CSV row whose engine (`row`) is named by its current name; the file is not touched."""
-    name = row.get("row")
-    if name is None:
-        return row
-    current = desc().canonical_engine(name)
-    return row if current == name else {**row, "row": current}
-
-
 def suite_of(manifest: dict) -> str:
     """The current id of the suite a manifest was recorded under."""
     return desc().canonical_suite(manifest["suite_id"])

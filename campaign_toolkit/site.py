@@ -381,7 +381,7 @@ def campaign_view(root, site_root):
                 unpinned=d.unpinned_profiles())
 
 
-def historical_names_note(page, site_root):
+def historical_names_note(page, site_root, root=None):
     """A one-paragraph key for a record page recorded under names the campaign has since renamed.
 
     The page is the recording's own report and is not rewritten, so it keeps the suite and engine
@@ -389,9 +389,15 @@ def historical_names_note(page, site_root):
     page's suite directory is not a historical name or there is no campaign descriptor.
     """
     from . import descriptor
+    if root is None:
+        return ''
     try:
         d = descriptor.current()
     except descriptor.DescriptorError:
+        return ''
+    # Only the campaign this site belongs to: a descriptor loaded for another root says nothing
+    # about these pages.
+    if d.root != pathlib.Path(root).resolve() or d.result_dir != pathlib.Path(site_root).resolve():
         return ''
     parts = page.relative_to(site_root).parts
     suite = parts[-2] if len(parts) >= 2 else ''
@@ -417,7 +423,7 @@ def render_page(page, site_root, root, blob, repo_ref, title):
 <style>{CSS}</style></head><body>
 <nav><a href="{html.escape(str(up / 'index.html'))}">current results</a> &middot;
 <a href="{html.escape(str(up / 'history.html'))}">history</a> &middot; {source} (<code>{html.escape(str(rel))}</code>)</nav>
-{historical_names_note(page, site_root)}{body}
+{historical_names_note(page, site_root, root)}{body}
 </body></html>
 """)
     return out
