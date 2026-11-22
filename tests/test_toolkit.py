@@ -848,6 +848,14 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertIn('Every row below at a verified shape passed `fixturebench verify`', report)
         self.assertNotIn('had to succeed', report)        # v1 evidence admits skipped rows
         self.assertLess(report.index('Verification was narrowed'), report.index('Every row below'))
+        # A grid naming every declared shape narrows nothing and changes nothing on the page.
+        manifest['verification'] = {'grid': {'n': sorted({n for pop in manifest['run_spec']['populations']
+                                                           for n in pop['n']})}}
+        (run / 'run.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
+        self.assertEqual(report_run.main(['--run-dir', str(run)], root=self.root), 0)
+        report = (run / 'report.md').read_text()
+        self.assertNotIn('Verification was narrowed', report)
+        self.assertIn('passed `fixturebench verify` on the same grid', report)
 
     def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):

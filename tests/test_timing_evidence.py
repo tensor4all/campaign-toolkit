@@ -118,14 +118,9 @@ class TimingEvidenceTest(unittest.TestCase):
         self.assertNotIn('A comparison is made from paired repeats', text)
         self.assertIn('Every timed cell matches a successful verification census', text)
         self.assertNotIn('Verification was narrowed', text)
-        # A narrowed verify must not be published as a full census match.
-        narrowed = copy.deepcopy(manifest) | {'verification': {'grid': {'n': ['2']}}}
-        narrowed_text = report_run.render(narrowed, suite, rows, self.root)
-        self.assertNotIn('Every timed cell matches', narrowed_text)
-        self.assertIn('Every verified cell matches a successful verification census', narrowed_text)
-        self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 2 were verified',
-                      narrowed_text)
-        self.assertIn('were timed and had to succeed', narrowed_text)
+        # A `verify:` grid naming every declared shape narrows nothing and changes nothing.
+        whole = copy.deepcopy(manifest) | {'verification': {'grid': {'n': ['2']}}}
+        self.assertEqual(report_run.render(whole, suite, rows, self.root), text)
         self.assertEqual(report_run.report_axes(rows, {'version': 1}), ())
         orderless = [{k: v for k, v in row.items() if k != 'order'} for row in rows]
         self.assertEqual(report_run.report_axes(orderless, manifest['timing_policy']), ())
@@ -295,3 +290,22 @@ class TimingEvidenceTest(unittest.TestCase):
                 self.write(name, rows)
                 with self.assertRaisesRegex(ValueError, 'missing, unexpected or status-changed'):
                     self.validate(manifest)
+
+    def test_a_narrowed_verify_is_not_published_as_a_full_census_match(self):
+        narrowed = self.narrowed('mul', ['block', 'sequence'], ['block', 'sequence'])
+        self.validate(narrowed)
+        fixture = pathlib.Path(__file__).parent / 'fixture'
+        shutil.copytree(fixture / 'benchmarks', self.root / 'benchmarks')
+        descriptor.set_root(self.root)
+        manifest = yaml.safe_load(next((fixture / 'data/results').glob('*/*/*/run.yaml')).read_text())
+        manifest.update({key: value for key, value in narrowed.items()
+                         if key not in ('library', 'harness', 'threads')})
+        manifest['timing_policy']['minimum_untimed_priming_ms'] = 3000
+        suite = yaml.safe_load((fixture / 'benchmarks/suites/fixture-kernels.yaml').read_text())
+        rows = report_run.read_rows([self.root / name for name in narrowed['result_files']])
+        text = report_run.render(manifest, suite, rows, self.root)
+        self.assertNotIn('Every timed cell matches', text)
+        self.assertIn('Every verified cell matches a successful verification census', text)
+        self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 2 were verified',
+                      text)
+        self.assertIn('were timed and had to succeed', text)    # v2 evidence refuses a skipped one

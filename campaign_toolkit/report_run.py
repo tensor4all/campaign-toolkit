@@ -299,7 +299,13 @@ def render(manifest, suite, rows, run_dir):
     # A suite may narrow the shapes its verify runs on (`verification.grid`); the larger declared
     # shapes are then timed without being verified, and the page must say what was checked
     # instead of implying it checked everything (docs/cross-implementation-verification.md).
-    narrowed_n = [str(v) for v in ((manifest.get("verification") or {}).get("grid") or {}).get("n", [])]
+    # A `verify:` block that names every declared shape narrows nothing, so it is checked against
+    # the populations, the way the recorder and `timing_evidence` apply it: a population the grid
+    # names is narrowed to the named shapes, one it does not name keeps all of its own.
+    grid_n = {str(v) for v in ((manifest.get("verification") or {}).get("grid") or {}).get("n", [])}
+    narrowed_n = sorted(grid_n, key=lambda n: [int(x) if x.isdigit() else x for x in n.split("x")]) if any(
+        {str(n) for n in pop["n"]} & grid_n and not {str(n) for n in pop["n"]} <= grid_n
+        for pop in manifest["run_spec"]["populations"]) else []
     # Only v2 evidence refuses a skipped unverified cell (`timing_evidence.validate`); a v1 page
     # cannot claim that those cells succeeded.
     narrowed_note = ([f"Verification was narrowed (`verification.grid`): only the shapes n = "
