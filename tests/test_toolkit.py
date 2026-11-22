@@ -807,6 +807,10 @@ class FixtureCampaignTest(unittest.TestCase):
             stack.enter_context(mock.patch.object(descriptor, 'run_module',
                                                   return_value=subprocess.CompletedProcess([], 0, '', '')))
             err = stack.enter_context(mock.patch('sys.stderr', new_callable=io.StringIO))
+            # the same whole node under a profile that declares no thread_rows is still refused
+            with self.assertRaisesRegex(SystemExit, 'inside the measured L3 domain'):
+                record_run.main(['fixture-cpu', 'fixture-kernels', '--threads', '1',
+                                 '--label', 'undeclared', '--allow-local-commits'], root=self.root)
             code = record_run.main(['fixture-cpu-whole', 'fixture-kernels', '--threads', '1',
                                     '--label', 'whole', '--allow-local-commits'], root=self.root)
         self.assertEqual(code, 0)
@@ -828,6 +832,17 @@ class FixtureCampaignTest(unittest.TestCase):
         split = (self.root / RUN_A_REL / 'report.md').read_text()
         self.assertNotIn('observer: **unavailable**', split)
         self.assertNotIn('the recorder shares', split)
+
+    def test_a_narrowed_verify_is_stated_on_a_v1_page(self):
+        # The v1 verify note says every row passed verify "on the same grid"; a run that narrowed
+        # the verify must not be published under that sentence alone.
+        run = self.root / RUN_A_REL
+        manifest = yaml.safe_load((run / 'run.yaml').read_text())
+        manifest['verification'] = {'grid': {'n': [4]}}
+        (run / 'run.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
+        self.assertEqual(report_run.main(['--run-dir', str(run)], root=self.root), 0)
+        self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 4 were verified',
+                      (run / 'report.md').read_text())
 
     def test_spanning_domains_warns_instead_of_refusing(self):
         with mock.patch.object(record_run, 'l3_domain', return_value={4, 5, 6, 7, 16, 17, 18, 19}):
@@ -873,6 +888,7 @@ class FixtureCampaignTest(unittest.TestCase):
         self.assertEqual(record['affinity'], '0-3, 12-15')
         self.assertEqual(record['free_cpus'], '0-3, 12-15')   # nothing outside the domain is left out
         self.assertIn('sched_getaffinity', record['source'])
+        self.assertNotIn('caveat', record)    # a split run is never published as observer-unavailable
 
     def test_single_l3_domain_host_warns_instead_of_refusing(self):
         # A small CI runner has one L3 domain: nothing can be parked off the measured cache there,

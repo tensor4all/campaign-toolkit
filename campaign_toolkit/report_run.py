@@ -294,6 +294,15 @@ def render(manifest, suite, rows, run_dir):
     # but it sampled cores the recorder shares, and the observer audit had no side to audit, so
     # the page has to say so or its lines read exactly like a properly split run's.
     caveat = (manifest["threads"].get("observer") or {}).get("caveat")
+    # A suite may narrow the shapes its verify runs on (`verification.grid`); the larger declared
+    # shapes are then timed without being verified, and the page must say what was checked
+    # instead of implying it checked everything (docs/cross-implementation-verification.md).
+    narrowed_n = [str(v) for v in ((manifest.get("verification") or {}).get("grid") or {}).get("n", [])]
+    narrowed_note = ([f"Verification was narrowed (`verification.grid`): only the shapes n = "
+                      f"{', '.join(narrowed_n)} were verified. Cells at the other declared shapes of "
+                      f"those populations were timed and had to succeed, but no verification "
+                      f"checked them; a population the grid does not name was verified at every "
+                      f"shape."] if narrowed_n else [])
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
@@ -392,8 +401,12 @@ def render(manifest, suite, rows, run_dir):
                                    for t, c in sorted(manifest["threads"]["cpu_sets"].items(),
                                                       key=lambda kv: int(kv[0]))),
         "",
-        *(d.verify_note().replace("{binary}", d.measured["binary"]).splitlines() if not v2 else [
-            'Every timed cell matches a successful verification census, including operation variants.',
+        *(d.verify_note().replace("{binary}", d.measured["binary"]).splitlines() + narrowed_note
+          if not v2 else [
+            ('Every verified cell matches a successful verification census, including operation '
+             'variants.' if narrowed_n else
+             'Every timed cell matches a successful verification census, including operation variants.'),
+            *narrowed_note,
             'Each cell is median of process medians ± sample SD of those medians; W is the median',
             'within-process sample SD. All values are milliseconds. These are descriptive spreads,',
             'not confidence intervals. The between-process spread includes the rotating-order schedule.',

@@ -116,6 +116,15 @@ class TimingEvidenceTest(unittest.TestCase):
         self.assertIn('[block]', text)
         self.assertIn('[sequence]', text)
         self.assertNotIn('A comparison is made from paired repeats', text)
+        self.assertIn('Every timed cell matches a successful verification census', text)
+        self.assertNotIn('Verification was narrowed', text)
+        # A narrowed verify must not be published as a full census match.
+        narrowed = copy.deepcopy(manifest) | {'verification': {'grid': {'n': ['2']}}}
+        narrowed_text = report_run.render(narrowed, suite, rows, self.root)
+        self.assertNotIn('Every timed cell matches', narrowed_text)
+        self.assertIn('Every verified cell matches a successful verification census', narrowed_text)
+        self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 2 were verified',
+                      narrowed_text)
         self.assertEqual(report_run.report_axes(rows, {'version': 1}), ())
         orderless = [{k: v for k, v in row.items() if k != 'order'} for row in rows]
         self.assertEqual(report_run.report_axes(orderless, manifest['timing_policy']), ())
