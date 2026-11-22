@@ -168,6 +168,11 @@ class AliasedCampaignTest(unittest.TestCase):
 
         code, out = run()
         self.assertEqual(code, 0, out)
+        # report_run, the remedy the check names, writes the same report (one renderer, not two)
+        before = (self.root / RUN_A_REL / "report.md").read_bytes()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(report_run.main(["--run-dir", str(self.root / RUN_A_REL)], root=self.root), 0)
+        self.assertEqual((self.root / RUN_A_REL / "report.md").read_bytes(), before)
         # and the numbers are still checked: an edited timing no longer regenerates the report
         csv_path = next((self.root / RUN_A_REL).glob("run0-*.csv"))
         lines = csv_path.read_text().splitlines()
@@ -291,14 +296,13 @@ class AliasedCampaignTest(unittest.TestCase):
         self.assertTrue(points and all(p["suite"] == "fixture-core" for p in points))
 
     def test_the_site_labels_the_cell_and_keys_the_old_record(self):
-        out = site.write_site(self.root / "result", root=self.root, title="fixture")
+        site.write_site(self.root / "result", root=self.root, title="fixture")
         index = (self.root / "result/index.html").read_text()
         self.assertIn("fixture-cpu/fixture-core/", index)
         page = next((self.root / "result/fixture-cpu/fixture-kernels").glob("*.html"))
         text = page.read_text()
         self.assertIn("Recorded under historical names", text)
         self.assertIn("<code>algo-lane</code> is <code>algo-line</code>", text)
-        self.assertTrue(out is None or out)
 
 
 if __name__ == "__main__":

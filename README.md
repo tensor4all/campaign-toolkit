@@ -280,10 +280,12 @@ aliases:
   report: {provider_label: faer rows}        # report labels as a pre-rename run printed them
 ```
 
-`check_generated` renders a changed run against the declaration it recorded, read back from git by
-its `suite_sha256` (the renamed or edited file is not what its report printed), and with the
-`aliases.report` labels when the run was recorded under historical names, so an old run's
-report still regenerates byte for byte and its numbers stay checked.
+A run recorded under a historical suite id is rendered, by `report_run` and by `check_generated`
+alike (`report_run.declaration_for`), against the declaration it recorded: the blob whose sha256
+is its `suite_sha256`, read back from git, or the newest file under its historical id. It is
+rendered with the `aliases.report` labels. So an old run's report still regenerates byte for
+byte and its numbers stay checked. A campaign without `aliases` renders against the current
+declaration, as before.
 
 A rename rewrites the suite file, so without `suite_sha256` every run recorded under the old file
 reads as measured under another declaration: the validator skips its declaration-derived checks and

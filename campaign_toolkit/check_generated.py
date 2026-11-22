@@ -11,22 +11,19 @@ is the check that nobody edited it by hand:
 2. every run changed since `--base` (or each `--run`, or every run with `--all`) regenerates its
    `report.md` from its CSVs byte for byte. Only changed runs, because a report written by an
    older toolkit is not expected to match today's renderer, and regenerating every run on every
-   push would be the expensive part of CI. A run whose declaration has since moved (an edit, or
-   a rename in `aliases.suites`) is rendered against the declaration it recorded, read back from
-   git by its `suite_sha256`;
+   push would be the expensive part of CI. A run recorded under a historical suite id (renamed,
+   `aliases.suites`) is rendered against the declaration it recorded, as `report_run` renders it
+   (`report_run.declaration_for`);
 3. the index is current (`gen_index --check`).
 
 Charts, comparisons and trends are not committed (the site generates them), so there is nothing
 of theirs to compare. Exits 1 and names every difference.
 """
 import argparse
-import hashlib
 import os
 import pathlib
 import subprocess
 import sys
-
-import yaml
 
 from . import descriptor, gen_index, report_run
 from .campaign import load, page_source, record_pages
@@ -91,54 +88,6 @@ def orphaned_runs(d, base):
     return errors
 
 
-def recorded_declaration(d, manifest, _cache={}):
-    """The suite declaration a run was recorded under, read back from git, or None.
-
-    A run records its declaration's `suite_sha256`. When the declaration has since moved -- an
-    edit, or a rename (`aliases.suites`), whose old file no longer exists -- the report printed the
-    old prose, so it can only regenerate from the old file. That file is in the repository's
-    history under one of the suite's names: the newest commit whose blob hashes to the recorded
-    value is read. A run under a historical id whose exact blob was never committed is rendered
-    against the newest version of the file under that id, which is what it was rendered against
-    before the rename. None when neither is reachable (a shallow clone); the caller then renders
-    against the current declaration, as before.
-    """
-    want = manifest.get('suite_sha256')
-    if not want:
-        return None
-    current = d.suite_path(manifest['suite_id'])
-    if current.exists() and hashlib.sha256(current.read_bytes()).hexdigest() == want:
-        return load(current)
-    key = (str(d.root), want)
-    if key in _cache:
-        return _cache[key]
-    found = None
-    names = d.suite_names(d.canonical_suite(manifest['suite_id']))
-    paths = [(d.suites_dir / f'{name}.yaml').relative_to(d.root).as_posix() for name in names]
-    log = subprocess.run(['git', '-C', str(d.root), 'log', '--all', '--format=%H', '--', *paths],
-                         capture_output=True, text=True)
-    for commit in log.stdout.split():
-        for path in paths:
-            blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:{path}'], capture_output=True)
-            if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == want:
-                found = yaml.safe_load(blob.stdout)
-                break
-        if found is not None:
-            break
-    if found is None and manifest['suite_id'] != d.canonical_suite(manifest['suite_id']):
-        # Not recorded against a committed blob, but under a historical id: the newest version of
-        # the file under that id is what the campaign rendered it against before the rename.
-        own = (d.suites_dir / f"{manifest['suite_id']}.yaml").relative_to(d.root).as_posix()
-        for commit in subprocess.run(['git', '-C', str(d.root), 'log', '--all', '--format=%H', '--', own],
-                                     capture_output=True, text=True).stdout.split():
-            blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:{own}'], capture_output=True)
-            if blob.returncode == 0:
-                found = yaml.safe_load(blob.stdout)
-                break
-    _cache[key] = found
-    return found
-
-
 def all_runs(d):
     return sorted(m.parent for m in (d.root / d.data['data_dir']).rglob('run.yaml'))
 
@@ -153,7 +102,7 @@ def check_report(d, run_dir):
         manifest = load(run_dir / 'run.yaml')
         # The declaration the run was recorded under, when git still has it: a renamed or edited
         # declaration prints different prose, and a report is regenerated to check its numbers.
-        suite = recorded_declaration(d, manifest) or load(d.suite_path(manifest['suite_id']))
+        suite = report_run.declaration_for(manifest)
         rows = report_run.read_rows([run_dir / f for f in manifest.get('result_files') or []])
         text = report_run.render(manifest, suite, rows, run_dir)
     except (SystemExit, Exception) as error:    # every failure is a finding here
