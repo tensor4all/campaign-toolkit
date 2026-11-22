@@ -35,7 +35,8 @@ def declaration_drifted(manifest, suite_file):
         return True
     import hashlib
     current = hashlib.sha256(pathlib.Path(suite_file).read_bytes()).hexdigest()
-    return recorded != current
+    # A rename that changed only names maps the recorded hash to the renamed file's (`aliases`).
+    return descriptor.current().canonical_suite_sha(recorded) != current
 
 
 def check_vendor(manifest, errors):

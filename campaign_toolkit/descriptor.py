@@ -178,7 +178,19 @@ class Descriptor:
         """
         declared = self.data.get("aliases") or {}
         return {"suites": dict(declared.get("suites") or {}),
-                "engines": dict(declared.get("engines") or {})}
+                "engines": dict(declared.get("engines") or {}),
+                "suite_sha256": dict(declared.get("suite_sha256") or {})}
+
+    def canonical_suite_sha(self, sha: "str | None") -> "str | None":
+        """The declaration hash a recorded `suite_sha256` stands for after a rename.
+
+        A rename rewrites the suite file, so every run recorded under it would read as measured
+        under another declaration and lose its declaration-derived checks. `aliases.suite_sha256`
+        maps a recorded hash to the hash of the file the rename produced, when the campaign states
+        that only names changed. The entry holds only while that file is byte for byte the same:
+        a later edit has a new hash, and the run reads as drifted again, as any edit makes it.
+        """
+        return self.aliases["suite_sha256"].get(sha, sha)
 
     def canonical_suite(self, suite_id: str) -> str:
         """The current id of a suite named by a historical id, or the id itself."""

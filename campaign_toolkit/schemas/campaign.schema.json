@@ -270,6 +270,11 @@
           "description": "Historical engine (and provider) name -> current engine name (a key of engines).",
           "type": "object",
           "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "suite_sha256": {
+          "description": "Recorded suite_sha256 -> sha256 of the file a names-only rename produced. Holds only while that file is unchanged.",
+          "type": "object",
+          "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
         }
       }
     },

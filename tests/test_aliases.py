@@ -6,9 +6,11 @@ The fixture campaign is copied and renamed the way a real campaign would rename 
 that looks a name up must still find the declaration and the provider, and every reader that
 aggregates must put the old runs under the new names.
 """
-import io
 import contextlib
+import hashlib
+import io
 import pathlib
+import shutil
 import sys
 import unittest
 
@@ -19,7 +21,7 @@ sys.path.insert(0, str(TOOLKIT))
 sys.path.insert(0, str(TOOLKIT / "tests"))
 
 from campaign_toolkit import (  # noqa: E402
-    campaign, declarations, descriptor, gen_index, publish_report, report_run, site, trend, validate_run,
+    campaign, candidate, declarations, descriptor, gen_index, publish_report, report_run, site, trend, validate_run,
 )
 import test_toolkit  # noqa: E402
 
@@ -79,6 +81,53 @@ class AliasedCampaignTest(unittest.TestCase):
         self.assertEqual(campaign.provider_of("algo-lane"), "algo")
         self.assertEqual(campaign.provider_of("algo-line"), "algo")
         self.assertEqual(d.suite_names("fixture-core"), ["fixture-core", "fixture-kernels"])
+
+    def declare_names_only(self):
+        """State that the rename changed only names: the old declaration hash is the new file's."""
+        old = yaml.safe_load((self.root / RUN_A_REL / "run.yaml").read_text())["suite_sha256"]
+        new = hashlib.sha256((self.root / "benchmarks/suites/fixture-core.yaml").read_bytes()).hexdigest()
+        path = self.root / "benchmarks/campaign.yaml"
+        desc = yaml.safe_load(path.read_text())
+        desc["aliases"]["suite_sha256"] = {old: new}
+        path.write_text(yaml.safe_dump(desc, sort_keys=False))
+        descriptor.set_root(self.root)
+        return old, new
+
+    def test_a_names_only_rename_keeps_the_declaration_checks(self):
+        manifest = str(self.root / RUN_A_REL / "run.yaml")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(validate_run.validate(manifest), [])
+        self.assertIn("declaration-derived checks skipped", err.getvalue())   # without the entry
+        old, new = self.declare_names_only()
+        self.assertEqual(declarations.check(self.root, out=io.StringIO()), [])
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(validate_run.validate(manifest), [])
+        self.assertNotIn("declaration-derived checks skipped", err.getvalue())
+        # The declaration checks really run: a thread count the suite does not declare is refused.
+        data = yaml.safe_load(pathlib.Path(manifest).read_text())
+        data["threads"]["counts"] = [99]
+        pathlib.Path(manifest).write_text(yaml.safe_dump(data, sort_keys=False))
+        self.assertTrue(any("99" in e for e in validate_run.validate(manifest)))
+
+    def test_the_entry_lapses_when_the_renamed_file_is_edited(self):
+        self.declare_names_only()
+        suite = self.root / "benchmarks/suites/fixture-core.yaml"
+        suite.write_text(suite.read_text() + "\n# an edit after the rename\n")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            validate_run.validate(str(self.root / RUN_A_REL / "run.yaml"))
+        self.assertIn("declaration-derived checks skipped", err.getvalue())
+
+    def test_a_candidate_under_the_renamed_declaration_compares_with_an_old_baseline(self):
+        old, new = self.declare_names_only()
+        baseline = self.root / RUN_A_REL
+        renamed = self.root / "data/results/fixture-cpu/fixture-core/20270101T000000Z"
+        shutil.copytree(baseline, renamed)
+        data = yaml.safe_load((renamed / "run.yaml").read_text())
+        data.update(suite_id="fixture-core", suite_file="benchmarks/suites/fixture-core.yaml", suite_sha256=new)
+        (renamed / "run.yaml").write_text(yaml.safe_dump(data, sort_keys=False))
+        differences = candidate.identity_differences(baseline, renamed)
+        self.assertNotIn("the suite declaration changed between the runs", differences)
+        self.assertFalse(any(d.startswith("suite:") for d in differences), differences)
 
     def test_old_manifests_still_validate(self):
         for manifest in sorted((self.root / "data/results").rglob("run.yaml")):

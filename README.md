@@ -276,7 +276,14 @@ manifest, its CSV rows and its report under the old names. The descriptor maps t
 aliases:
   suites: {faer-kernels: colmat-kernels}     # historical suite id -> current id (a suites_dir file)
   engines: {faer-fork: colmat}               # historical engine/provider name -> a key of engines
+  suite_sha256: {<recorded sha>: <sha of the renamed file>}   # only when the rename changed names only
 ```
+
+A rename rewrites the suite file, so without `suite_sha256` every run recorded under the old file
+reads as measured under another declaration: the validator skips its declaration-derived checks and
+`candidate` refuses to compare it with a run recorded after the rename. The entry states that the
+old declaration and the renamed file declare the same grid. It holds only while that file is byte
+for byte the same; a later edit gives it a new hash and the old runs read as drifted again.
 
 The readers that look a name up (`find_suite`, `suite_path`, `provider_of`, the validator's
 `suite_file` check, the report's engine documentation) accept either name, and the readers that

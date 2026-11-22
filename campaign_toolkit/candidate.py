@@ -33,6 +33,14 @@ def _manifest(run_dir):
     return yaml.safe_load((pathlib.Path(run_dir) / 'run.yaml').read_text())
 
 
+def _canonical_sha(sha):
+    """A recorded declaration hash through the campaign's `aliases.suite_sha256`, if any."""
+    try:
+        return descriptor.current().canonical_suite_sha(sha)
+    except descriptor.DescriptorError:
+        return sha
+
+
 def identity_differences(baseline, candidate):
     """[] when the candidate run may be compared with the baseline; a list of reasons otherwise."""
     baseline, candidate = _manifest(baseline), _manifest(candidate)
@@ -40,7 +48,8 @@ def identity_differences(baseline, candidate):
     if (descriptor.canonical_suite(str(baseline.get('suite_id')))
             != descriptor.canonical_suite(str(candidate.get('suite_id')))):
         out.append(f"suite: {baseline.get('suite_id')!r} vs {candidate.get('suite_id')!r}")
-    if baseline.get('suite_sha256') != candidate.get('suite_sha256'):
+    if (_canonical_sha(baseline.get('suite_sha256'))
+            != _canonical_sha(candidate.get('suite_sha256'))):
         out.append('the suite declaration changed between the runs')
     for key in IDENTITY_KEYS:
         one, two = baseline.get(key) or {}, candidate.get(key) or {}
