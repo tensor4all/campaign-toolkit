@@ -845,7 +845,27 @@ def main(argv=None, root=None):
     profiles = d.profiles()
     suite = yaml.safe_load(d.suite_path(args.suite_id).read_text())
     spec = suite["runs"][0]
-    declared = populations(suite)
+    arms = vendor_engines(spec["engines"])
+    if args.vendor and not arms:
+        sys.exit(f"ERROR: --vendor {args.vendor!r} was given, but this suite declares no vendor arm "
+                 f"({spec['engines']})")
+    if args.vendor:
+        arm = args.vendor
+    elif len(arms) == 1:
+        arm = arms[0]
+    elif arms:
+        sys.exit(f"ERROR: this suite declares the vendor arms {arms}, and one binary links one vendor "
+                 f"library, so one run records one of them: pass --vendor")
+    else:
+        # A suite with no vendor engine measures no BLAS/LAPACK vendor library: there is no arm to
+        # select, and the manifest records no vendor identity rather than an empty one.
+        arm = None
+    if arm is not None and arm not in arms:
+        sys.exit(f"ERROR: --vendor {arm!r} is not one of the arms this suite declares ({arms})")
+    if arm is not None and arm not in d.vendor_providers:
+        sys.exit(f"ERROR: unknown vendor arm {arm!r}; this campaign knows {list(d.vendor_providers)}")
+    # What this arm is declared to measure: a suite may narrow one arm to some families.
+    declared = populations(suite, arm)
     covered = declared
     if args.regimes:
         wanted = set(args.regimes.split(","))
@@ -871,25 +891,6 @@ def main(argv=None, root=None):
     # A declared case axis -- the memory order, in the campaigns that declare one. It is part
     # of a cell's identity, so it is recorded and it is part of the coverage comparison.
     order = spec.get("order", [])
-    arms = vendor_engines(spec["engines"])
-    if args.vendor and not arms:
-        sys.exit(f"ERROR: --vendor {args.vendor!r} was given, but this suite declares no vendor arm "
-                 f"({spec['engines']})")
-    if args.vendor:
-        arm = args.vendor
-    elif len(arms) == 1:
-        arm = arms[0]
-    elif arms:
-        sys.exit(f"ERROR: this suite declares the vendor arms {arms}, and one binary links one vendor "
-                 f"library, so one run records one of them: pass --vendor")
-    else:
-        # A suite with no vendor engine measures no BLAS/LAPACK vendor library: there is no arm to
-        # select, and the manifest records no vendor identity rather than an empty one.
-        arm = None
-    if arm is not None and arm not in arms:
-        sys.exit(f"ERROR: --vendor {arm!r} is not one of the arms this suite declares ({arms})")
-    if arm is not None and arm not in d.vendor_providers:
-        sys.exit(f"ERROR: unknown vendor arm {arm!r}; this campaign knows {list(d.vendor_providers)}")
     # The engines this arm is expected to measure: the measured provider's rows every arm carries,
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)

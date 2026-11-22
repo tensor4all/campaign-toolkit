@@ -91,6 +91,13 @@ def check(root, out=None) -> list:
                 unknown = set(population["groups"]) - groups
                 if unknown:
                     problems.append(f"{path}: population names unknown groups {sorted(unknown)}")
+            known = {f for g in suite["family_groups"].values() for f in g}
+            for provider, only in spec.get("vendor_families", {}).items():
+                if provider not in d.vendor_providers:
+                    problems.append(f"{path}: vendor_families names {provider!r}, which is not a vendor provider")
+                if set(only) - known:
+                    problems.append(f"{path}: vendor_families[{provider}] names unknown families "
+                                    f"{sorted(set(only) - known)}")
             for engine in spec["engines"]:
                 if engine not in engines:
                     problems.append(f"{path}: engine {engine!r} is not declared by the descriptor")

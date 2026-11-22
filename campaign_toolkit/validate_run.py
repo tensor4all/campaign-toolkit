@@ -106,8 +106,9 @@ def check_declaration(manifest, suite, spec, errors):
     cannot be reconstructed, so these are skipped once the suite has moved -- but only these.
     What a manifest says about itself, what it recorded and what it linked is checked either way.
     """
-    declared = {p["regime"]: p for p in populations(suite)}
     rs = manifest.get("run_spec", {})
+    arm = vendor_of_engines(rs.get("engines", []))
+    declared = {p["regime"]: p for p in populations(suite, arm)}
     # A partial run is legitimate -- the campaign is not run in full on every
     # profile -- but for this vendor arm it may only be a subset of what the suite
     # declares, and the manifest has to say whether it covered the declaration.
@@ -149,7 +150,7 @@ def check_declaration(manifest, suite, spec, errors):
             if v not in declared_values:
                 errors.append(f"run_spec.{key} contains {v!r}, which the suite does not declare "
                               f"for a run of this vendor arm")
-    covers = (same_populations(covered, populations(suite))
+    covers = (same_populations(covered, populations(suite, arm))
               and manifest["threads"]["counts"] == spec["threads"]
               and rs.get("dtypes") == spec["dtypes"]
               and rs.get("order", []) == spec.get("order", [])
