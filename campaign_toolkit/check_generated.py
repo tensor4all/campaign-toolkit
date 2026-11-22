@@ -86,6 +86,14 @@ def orphaned_runs(d, base):
     return errors
 
 
+def _recorded_suite(run):
+    """The suite id a run's manifest records, or None when it cannot be read."""
+    try:
+        return load(run / 'run.yaml')['suite_id']
+    except Exception:    # an unreadable manifest is check_report's finding, not this filter's
+        return None
+
+
 def all_runs(d):
     return sorted(m.parent for m in (d.root / d.data['data_dir']).rglob('run.yaml'))
 
@@ -129,6 +137,16 @@ def main(argv=None, root=None):
         errors += orphaned_runs(d, args.base)
     else:
         runs = []
+    # A run recorded under a historical suite id (before a rename, `aliases.suites`) printed the
+    # declaration it was recorded under; the rename replaced that file, so its report cannot be
+    # regenerated from the current one and would always differ in prose. It is kept as recorded:
+    # its page is still checked byte for byte against it (check_pages above), it is not regenerated.
+    historical = [run for run in runs if _recorded_suite(run) not in (None, d.canonical_suite(_recorded_suite(run)))]
+    if historical:
+        print(f'note: {len(historical)} run(s) recorded under a historical suite id are kept as recorded, '
+              f'not regenerated: {", ".join(str(r.relative_to(d.root)) for r in historical[:3])}'
+              f'{" ..." if len(historical) > 3 else ""}', file=sys.stderr)
+    runs = [run for run in runs if run not in historical]
     for run in runs:
         errors += check_report(d, run)
     index = 0 if args.no_index else gen_index.main(['--check'], root=d.root)

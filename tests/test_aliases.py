@@ -132,6 +132,27 @@ class AliasedCampaignTest(unittest.TestCase):
         pages, _missing = site.current_pages(site_root, [])
         self.assertEqual(len([p for p in pages if p.parent.parent.name == "fixture-cpu"]), 1)
 
+    def test_a_run_under_the_historical_suite_id_is_kept_as_recorded(self):
+        from campaign_toolkit import check_generated
+        # The rename changes the declaration's prose; the old report must not be regenerated
+        # against it (it would always differ), and its page is still compared with it.
+        suite = self.root / "benchmarks/suites/fixture-core.yaml"
+        suite.write_text(suite.read_text().replace("The overhead baseline.", "The overhead baseline (renamed)."))
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            code = check_generated.main(["--all", "--no-index"], root=self.root)
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("kept as recorded, not regenerated", err.getvalue())
+
+    def test_chart_cells_from_old_rows_are_keyed_by_the_current_engine(self):
+        import test_candidate
+        from campaign_toolkit import throughput
+        run = test_candidate.make_run(self.root / "probe", "old")
+        for path in run.glob("*.csv"):
+            test_candidate.rewrite(path, lambda rows: [
+                {**r, "row": "algo-lane" if r["row"] == "faer-fork" else r["row"]} for r in rows])
+        cells = throughput.load_run(run, dtype="f64", order="c")
+        self.assertEqual({key[4] for key in cells} & {"algo-lane", "algo-line"}, {"algo-line"})
+
     def test_lookups_accept_either_name(self):
         d = descriptor.current()
         self.assertEqual(d.suite_path("fixture-kernels").name, "fixture-core.yaml")
