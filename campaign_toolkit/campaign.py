@@ -49,16 +49,26 @@ def run_spec(suite: dict) -> dict:
     return suite["runs"][0]
 
 
-def populations(suite: dict) -> list:
+def populations(suite: dict, vendor: "str | None" = None) -> list:
     """The declared populations with their family groups expanded.
 
     The expansion is the definition of what the suite covers, so every entry point
     expands it the same way instead of trusting a manifest's own account.
+
+    A run spec may narrow one vendor arm with `vendor_families: {<provider>: [family, ...]}`:
+    that arm is then declared, and so expected to cover, only those families (a population left
+    with none is dropped). Every other arm keeps the full set. The narrowing is part of the
+    declaration, so coverage, validation and the recorder all read it through here.
     """
     groups = suite["family_groups"]
+    only = run_spec(suite).get("vendor_families", {}).get(vendor) if vendor else None
     out = []
     for spec in run_spec(suite)["populations"]:
         families = [f for group in spec["groups"] for f in groups[group]]
+        if only is not None:
+            families = [f for f in families if f in only]
+            if not families:
+                continue
         out.append({"regime": spec["regime"], "families": families,
                     "n": [str(n) for n in spec["n"]], "batch": [int(b) for b in spec["batch"]]})
     return out
@@ -255,7 +265,7 @@ def coverage_of(suite: dict, manifest: dict) -> str:
     spec = run_spec(suite)
     rs = manifest.get("run_spec", {})
     arm = vendor_of_engines(rs.get("engines", []))
-    want = populations(suite)
+    want = populations(suite, arm)
     got = rs.get("populations", [])
     if not got:
         return "declaration-changed"
@@ -267,7 +277,7 @@ def coverage_of(suite: dict, manifest: dict) -> str:
             and set(rs.get("order", [])) <= set(spec.get("order", []))
             and set(rs.get("engines", [])) <= declared_engines):
         return "declaration-changed"
-    full = (same_populations(got, populations(suite))
+    full = (same_populations(got, want)
             and manifest["threads"]["counts"] == spec["threads"]
             and rs.get("dtypes") == spec["dtypes"]
             and rs.get("order", []) == spec.get("order", [])

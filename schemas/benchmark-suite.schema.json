@@ -117,6 +117,15 @@
               }
             }
           },
+          "vendor_families": {
+            "description": "Optional per-arm narrowing: a mapping from a vendor provider to the families that arm measures. An arm not named keeps every family; a population left with no family for the arm is not measured by it. A missing cell of a narrowed arm is 'not measured for this arm', never a hole in the grid.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            }
+          },
           "populations": {
             "description": "Populations of `family group x shape grid x regime`. Declaring them explicitly, instead of one product over every family and shape, is what keeps the run affordable and its coverage legible.",
             "type": "array",

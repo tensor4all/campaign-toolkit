@@ -1271,6 +1271,38 @@ class CampaignSchemaTest(unittest.TestCase):
         self.assertNotIn('features', schema['properties']['measured']['required'])
 
 
+class VendorFamiliesTest(unittest.TestCase):
+    """`vendor_families` narrows one arm's declared families; every other arm keeps the full set."""
+
+    SUITE = {
+        "family_groups": {"a": ["gemm", "lu"], "b": ["qr", "svd"]},
+        "runs": [{"threads": [1], "dtypes": ["f64"], "engines": [],
+                  "vendor_families": {"openblas": ["gemm", "lu"]},
+                  "populations": [{"regime": "r-ab", "groups": ["a", "b"], "n": [8], "batch": [1]},
+                                  {"regime": "r-b", "groups": ["b"], "n": [8], "batch": [1]}]}],
+    }
+
+    def test_a_named_arm_gets_only_its_families_and_loses_empty_populations(self):
+        got = campaign.populations(self.SUITE, "openblas")
+        self.assertEqual([(p["regime"], p["families"]) for p in got], [("r-ab", ["gemm", "lu"])])
+
+    def test_other_arms_and_the_arm_less_view_keep_the_full_set(self):
+        for vendor in ("mkl", None):
+            got = campaign.populations(self.SUITE, vendor)
+            self.assertEqual([(p["regime"], p["families"]) for p in got],
+                             [("r-ab", ["gemm", "lu", "qr", "svd"]), ("r-b", ["qr", "svd"])])
+
+    def test_a_suite_without_the_field_is_unchanged(self):
+        suite = {**self.SUITE, "runs": [{k: v for k, v in self.SUITE["runs"][0].items()
+                                         if k != "vendor_families"}]}
+        self.assertEqual(campaign.populations(suite, "openblas"), campaign.populations(suite))
+
+    def test_the_schema_accepts_the_field(self):
+        schema = json.loads((TOOLKIT / "schemas/benchmark-suite.schema.json").read_text())
+        run = schema["properties"]["runs"]["items"]["properties"]
+        self.assertIn("vendor_families", run)
+
+
 class CpuSetsTest(unittest.TestCase):
     """Which CPUs a thread row runs on: the suite's list, the suite's entry for a profile, or the
     profile's own `thread_rows` (tensor4all-meta#76 3.3: the zen2-cpu smoke ran on zen5 CPUs)."""
