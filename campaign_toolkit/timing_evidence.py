@@ -114,6 +114,11 @@ def validate(manifest, run_dir):
               for pop in manifest['run_spec']['populations']
               for t in manifest['threads']['counts']}
     seen_groups = set()
+    # The notes an unverified cell carries are not compared with anything checked, but they must be
+    # the same in every process set of its group: a variant timed in one set only would leave the
+    # report a single process median for it, which it cannot summarise (and must not pass off as
+    # repeated). No note set is guessed; the first file of the group fixes it for the others.
+    unverified_notes = {}
     for name in manifest['result_files']:
         match = re.match(r'^run(\d+)-', name)
         if not match or int(match[1]) not in range(repeats):
@@ -169,6 +174,11 @@ def validate(manifest, run_dir):
         if (checked_rows != expected or {key[:-1] for key in unverified_rows} != unverified
                 or any(status != 'ok' for status in unverified_rows.values())):
             raise ValueError(f'{name}: missing, unexpected or status-changed timed cells')
+        for base in unverified:
+            notes = frozenset(key[-1] for key in unverified_rows if key[:-1] == base)
+            if unverified_notes.setdefault((group, base), notes) != notes:
+                raise ValueError(f'{name}: unverified cell {base} carries notes {sorted(notes)}, '
+                                 f'another process set {sorted(unverified_notes[(group, base)])}')
         rotation = repeat % len(engines)
         wanted_order = engines[rotation:] + engines[:rotation]
         if any(order != wanted_order for order in order_by_case.values()):

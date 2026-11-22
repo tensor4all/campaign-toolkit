@@ -309,3 +309,19 @@ class TimingEvidenceTest(unittest.TestCase):
         self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 2 were verified',
                       text)
         self.assertIn('were timed and had to succeed', text)    # v2 evidence refuses a skipped one
+
+    def test_an_unverified_cell_carries_the_same_notes_in_every_process_set(self):
+        # Which notes an unverified cell carries is not guessed, but a variant timed in one process
+        # set only has a single process median, which the report cannot summarise; it is refused at
+        # validation instead of crashing the page at publish time.
+        manifest = self.narrowed('lu', ['', 'api-inclusive'], [''])
+        name = 'run1-small-1t.csv'
+        rows = self.rows(name)
+        extra = [r | {'note': 'api-inclusive'} for r in rows if r['n'] == '4']
+        # keep the engine order of the n=4 case: each engine's variant row follows its plain row
+        ordered = [x for r in rows for x in ([r] + [e for e in extra if e['row'] == r['row']]
+                                              if r['n'] == '4' else [r])]
+        self.write(name, ordered)
+        with self.assertRaisesRegex(ValueError, 'another process set'):
+            self.validate(manifest)
+        # the same variant in every process set is accepted: test_an_unverified_shape_may_carry_separately_timed_variants
