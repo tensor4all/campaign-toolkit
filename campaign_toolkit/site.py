@@ -395,9 +395,10 @@ def historical_names_note(page, site_root, root=None):
         d = descriptor.current()
     except descriptor.DescriptorError:
         return ''
-    # Only the campaign this site belongs to: a descriptor loaded for another root says nothing
-    # about these pages.
-    if d.root != pathlib.Path(root).resolve() or d.result_dir != pathlib.Path(site_root).resolve():
+    # Only the campaign this site belongs to (its result dir is the site root): a descriptor
+    # loaded for another campaign says nothing about these pages. `root` is the repository root,
+    # which may sit above the campaign root, so it is not compared.
+    if d.result_dir != pathlib.Path(site_root).resolve():
         return ''
     parts = page.relative_to(site_root).parts
     suite = parts[-2] if len(parts) >= 2 else ''

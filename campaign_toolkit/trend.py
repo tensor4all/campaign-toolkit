@@ -200,7 +200,10 @@ def series(points, axis='pin'):
     """
     out = {}
     for point in sorted(points, key=lambda p: instant(p['timestamp'])):
-        key = (point['engine'], point['threads'], *(point.get(c) for c in CONDITIONS))
+        # Under the engine's current name, as `select` matches it: a points document written
+        # before a rename carries the historical name.
+        key = (descriptor.canonical_engine(point['engine']), point['threads'],
+               *(point.get(c) for c in CONDITIONS))
         x = point['library_commit'] if axis == 'pin' else week_of(point['timestamp'])
         out.setdefault(key, {})[x] = point          # later (newer) points replace earlier ones
     return out

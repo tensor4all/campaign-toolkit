@@ -790,6 +790,15 @@ def require_commits_on_remote(sources, label=None):
                      f"--allow-local-commits for a throwaway probe, which can never be published).")
 
 
+def covers_declared_engines(engines, suite, arm) -> bool:
+    """Whether a run's engines are this arm's declared engines, compared under current names.
+
+    The same comparison `coverage_of` and the validator make: a suite may still list a historical
+    engine name, and the recorder records under the current one.
+    """
+    return canonical_engines(engines) == canonical_engines(engines_for_vendor(suite, arm))
+
+
 def main(argv=None, root=None):
     if root is not None:
         descriptor.set_root(root)
@@ -1251,9 +1260,7 @@ def main(argv=None, root=None):
             "covers_declared_suite": (threads == spec["threads"]
                                       and dtypes == spec["dtypes"]
                                       and order == spec.get("order", [])
-                                      # under current names, as coverage_of and the validator
-                                      # compare: a suite may still list a historical engine
-                                      and engines == canonical_engines(engines_for_vendor(suite, arm))
+                                      and covers_declared_engines(engines, suite, arm)
                                       and same_populations(covered, declared)),
         },
     }

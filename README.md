@@ -289,7 +289,8 @@ The readers that look a name up (`find_suite`, `suite_path`, `provider_of`, the 
 `suite_file` check, the report's engine documentation) accept either name, and the readers that
 aggregate (`gen_index`, the site, the charts, the trend, `cell_of` and the comparisons) print the
 current one, so an old run and a new run of one suite land in the same cell. A regenerated old
-report is byte-identical, because it still prints the names its rows carry. The recorder records
+report still prints the names its rows carry; it is byte-identical only when the rename changed
+nothing but names, because the report also prints the current declaration's prose. The recorder records
 under the current names, whichever one it is given. The site's HTML copy of a record kept under a
 historical suite directory opens with a one-line key from the old names to the current ones.
 `declarations` refuses an alias that points at nothing, or one whose old name is still current.

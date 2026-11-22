@@ -94,15 +94,22 @@ class AliasedCampaignTest(unittest.TestCase):
         from campaign_toolkit import record_run
         suite = yaml.safe_load((self.root / "benchmarks/suites/fixture-core.yaml").read_text())
         suite["runs"][0]["engines"] = ["algo-lane" if e == "algo-line" else e for e in suite["runs"][0]["engines"]]
-        declared = campaign.engines_for_vendor(suite, "openblas")
-        recorded = [descriptor.current().canonical_engine(e) for e in declared]
-        self.assertNotEqual(declared, recorded)
-        self.assertEqual(recorded, record_run.canonical_engines(declared))
+        recorded = ["algo-line" if e == "algo-lane" else e for e in campaign.engines_for_vendor(suite, "openblas")]
+        self.assertIn("algo-line", recorded)
+        self.assertTrue(record_run.covers_declared_engines(recorded, suite, "openblas"))
+        self.assertFalse(record_run.covers_declared_engines(recorded[:-1], suite, "openblas"))
 
-    def test_trend_points_written_under_old_names_are_selected(self):
+    def test_trend_points_written_under_old_names_are_selected_and_drawn(self):
         points = [dict(suite="fixture-kernels", case_key="c", engine="algo-lane", threads=1)]
         entry = dict(suite="fixture-core", case="c", engines=["algo-line"], threads=[1])
         self.assertEqual(trend.select(points, entry), points)
+        # and drawn: render indexes the series by the entry's (current) engine names
+        run = (self.root / RUN_A_REL).resolve()
+        old = [dict(p, suite="fixture-kernels", engine="algo-lane") for p in trend.points_from_run(run)]
+        entry = dict(suite="fixture-core", case=old[0]["case_key"], engines=["algo-line"],
+                     threads=[old[0]["threads"]])
+        svg, data = trend.render(entry, old)[:2]
+        self.assertIn("algo-line", svg)
 
     def test_lookups_accept_either_name(self):
         d = descriptor.current()

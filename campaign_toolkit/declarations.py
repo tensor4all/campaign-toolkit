@@ -85,7 +85,12 @@ def check(root, out=None) -> list:
     suites = sorted(d.suites_dir.glob("*.yaml"))
     if not suites:
         problems.append(f"{d.suites_dir} declares no suites")
-    problems += check_aliases(d, {load(path)["id"] for path in suites})
+    ids = set()
+    for path in suites:
+        data = load(path)
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            ids.add(data["id"])                 # anything else is reported by the schema below
+    problems += check_aliases(d, ids)
     for path in suites:
         suite = load(path)
         try:
