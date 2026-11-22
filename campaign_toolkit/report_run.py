@@ -2,7 +2,9 @@
 """Turn one run's harness CSVs into the tracked report for a (profile, suite) cell.
 
 Only the numbers that came from a verified run are published: every row here was
-gated by the harness's verify pass before the timing pass started. The report
+gated by the harness's verify pass before the timing pass started. A run whose verify was
+narrowed to some shapes (`verification.grid`) says so above its tables, and which shapes the
+pass covered. The report
 repeats the run's provenance in its own header, because a table that is copied
 into a discussion without its commit is the thing this repository exists to stop.
 """
@@ -298,11 +300,20 @@ def render(manifest, suite, rows, run_dir):
     # shapes are then timed without being verified, and the page must say what was checked
     # instead of implying it checked everything (docs/cross-implementation-verification.md).
     narrowed_n = [str(v) for v in ((manifest.get("verification") or {}).get("grid") or {}).get("n", [])]
+    # Only v2 evidence refuses a skipped unverified cell (`timing_evidence.validate`); a v1 page
+    # cannot claim that those cells succeeded.
     narrowed_note = ([f"Verification was narrowed (`verification.grid`): only the shapes n = "
                       f"{', '.join(narrowed_n)} were verified. Cells at the other declared shapes of "
-                      f"those populations were timed and had to succeed, but no verification "
-                      f"checked them; a population the grid does not name was verified at every "
-                      f"shape."] if narrowed_n else [])
+                      f"those populations were timed"
+                      + (" and had to succeed" if v2 else "")
+                      + ", but no verification checked them; a population the grid does not name "
+                      "was verified at every shape."] if narrowed_n else [])
+    verify_note = d.verify_note().replace("{binary}", d.measured["binary"])
+    if narrowed_n:
+        # The campaign's note describes the pass; on a narrowed run its "every row ... on the same
+        # grid" opening would contradict the line above it, so it is scoped to the verified shapes.
+        verify_note = (verify_note.replace("Every row below passed", "Every row below at a verified shape passed")
+                       .replace(" on the same grid", "").replace("\non the same grid", "\n"))
     out = [
         f"# `{manifest['suite_id']}` on `{manifest['target_profile']}`",
         "",
@@ -401,8 +412,7 @@ def render(manifest, suite, rows, run_dir):
                                    for t, c in sorted(manifest["threads"]["cpu_sets"].items(),
                                                       key=lambda kv: int(kv[0]))),
         "",
-        *(d.verify_note().replace("{binary}", d.measured["binary"]).splitlines() + narrowed_note
-          if not v2 else [
+        *(narrowed_note + [""] * bool(narrowed_note) + verify_note.splitlines() if not v2 else [
             ('Every verified cell matches a successful verification census, including operation '
              'variants.' if narrowed_n else
              'Every timed cell matches a successful verification census, including operation variants.'),

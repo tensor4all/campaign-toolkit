@@ -125,6 +125,7 @@ class TimingEvidenceTest(unittest.TestCase):
         self.assertIn('Every verified cell matches a successful verification census', narrowed_text)
         self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 2 were verified',
                       narrowed_text)
+        self.assertIn('were timed and had to succeed', narrowed_text)
         self.assertEqual(report_run.report_axes(rows, {'version': 1}), ())
         orderless = [{k: v for k, v in row.items() if k != 'order'} for row in rows]
         self.assertEqual(report_run.report_axes(orderless, manifest['timing_policy']), ())
