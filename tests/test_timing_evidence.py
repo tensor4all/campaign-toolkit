@@ -116,6 +116,11 @@ class TimingEvidenceTest(unittest.TestCase):
         self.assertIn('[block]', text)
         self.assertIn('[sequence]', text)
         self.assertNotIn('A comparison is made from paired repeats', text)
+        self.assertIn('Every timed cell matches a successful verification census', text)
+        self.assertNotIn('Verification was narrowed', text)
+        # A `verify:` grid naming every declared shape narrows nothing and changes nothing.
+        whole = copy.deepcopy(manifest) | {'verification': {'grid': {'n': ['2']}}}
+        self.assertEqual(report_run.render(whole, suite, rows, self.root), text)
         self.assertEqual(report_run.report_axes(rows, {'version': 1}), ())
         orderless = [{k: v for k, v in row.items() if k != 'order'} for row in rows]
         self.assertEqual(report_run.report_axes(orderless, manifest['timing_policy']), ())
@@ -214,3 +219,109 @@ class TimingEvidenceTest(unittest.TestCase):
         manifest['run_spec']['populations'][0]['n'].append('4')
         with self.assertRaisesRegex(ValueError, 'declared run grid'):
             self.validate(manifest)
+
+
+    def narrowed(self, family, checked_notes, unchecked_notes):
+        """A run whose verify is narrowed to n=2 while n=4 is timed too.
+
+        `checked_notes` are the notes every engine's n=2 row carries, in the census and in the
+        timing files; `unchecked_notes` are the notes the timing files carry at the unverified n=4.
+        """
+        manifest = copy.deepcopy(self.manifest)
+        manifest['run_spec']['populations'][0].update(families=[family], n=['2', '4'])
+        manifest['verification'] = {'grid': {'n': ['2']}}
+
+        def row(n, engine, note, **extra):
+            return (dict(zip(timing_evidence.BASE,
+                             ('small', family, 'f64', 'c', n, n, '', '1', engine, '1')))
+                    | {'note': note, 'status': 'ok', 'samples_ms': '', 'total_ms': '',
+                       'per_item_us': '', 'rayon_threads': '1', 'vendor_threads': '1'} | extra)
+
+        self.write('verify-small-1t.csv',
+                   [row('2', engine, note) for engine in self.engines for note in checked_notes])
+        for repeat, name in enumerate(manifest['result_files']):
+            order = self.engines[repeat:] + self.engines[:repeat]
+            timed = {'samples_ms': json.dumps([1 + repeat, 3 + repeat]),
+                     'total_ms': str(2 + repeat), 'per_item_us': str((2 + repeat) * 1000)}
+            self.write(name, [row(n, engine, note, **timed)
+                              for n, notes in (('2', checked_notes), ('4', unchecked_notes))
+                              for engine in order for note in notes])
+        return manifest
+
+    def test_an_unverified_shape_is_compared_on_its_base_cell_not_on_a_guessed_note(self):
+        # The checked n=2 emits a plain and an `api-inclusive` row; the unchecked n=4 emitting only
+        # the plain row is still a complete run. Copying the checked shape's notes onto n=4 would
+        # refuse it as "missing" - nothing was verified at n=4 that could say which notes to expect.
+        self.validate(self.narrowed('lu', ['', 'api-inclusive'], ['']))
+
+    def test_an_unverified_shape_may_carry_separately_timed_variants(self):
+        # The opposite direction: the unchecked shape carries variant rows. Expecting only an
+        # empty note there (the rule before the census learned about notes) refused a finished run.
+        self.validate(self.narrowed('lu', ['', 'api-inclusive'], ['', 'api-inclusive']))
+        self.validate(self.narrowed('mul', ['block', 'sequence'], ['block', 'sequence']))
+
+    def test_an_unverified_shape_must_still_appear_and_succeed(self):
+        manifest = self.narrowed('lu', [''], [''])
+        self.validate(manifest)
+        name = 'run0-small-1t.csv'
+        original = self.rows(name)
+        missing = [r for r in original if not (r['n'] == '4' and r['row'] == 'vendor')]
+        skipped = [r | ({'status': 'skipped', 'samples_ms': '', 'total_ms': '', 'per_item_us': ''}
+                        if r['n'] == '4' and r['row'] == 'vendor' else {}) for r in original]
+        for label, rows in (('missing', missing), ('skipped', skipped)):
+            with self.subTest(label):
+                self.write(name, rows)
+                with self.assertRaisesRegex(ValueError, 'missing, unexpected or status-changed'):
+                    self.validate(manifest)
+        self.write(name, original)
+        self.validate(manifest)
+
+    def test_a_checked_shape_still_matches_its_census_exactly(self):
+        # Only the shapes the census never saw are compared on the base cell: a checked shape that
+        # drops a verified variant, or adds one nothing verified, is still refused.
+        manifest = self.narrowed('lu', ['', 'api-inclusive'], [''])
+        name = 'run0-small-1t.csv'
+        original = self.rows(name)
+        dropped = [r for r in original if not (r['n'] == '2' and r['note'] == 'api-inclusive'
+                                               and r['row'] == 'candidate')]
+        added = original + [original[0] | {'note': 'extra'}]
+        for label, rows in (('dropped', dropped), ('added', added)):
+            with self.subTest(label):
+                self.write(name, rows)
+                with self.assertRaisesRegex(ValueError, 'missing, unexpected or status-changed'):
+                    self.validate(manifest)
+
+    def test_a_narrowed_verify_is_not_published_as_a_full_census_match(self):
+        narrowed = self.narrowed('mul', ['block', 'sequence'], ['block', 'sequence'])
+        self.validate(narrowed)
+        fixture = pathlib.Path(__file__).parent / 'fixture'
+        shutil.copytree(fixture / 'benchmarks', self.root / 'benchmarks')
+        descriptor.set_root(self.root)
+        manifest = yaml.safe_load(next((fixture / 'data/results').glob('*/*/*/run.yaml')).read_text())
+        manifest.update({key: value for key, value in narrowed.items()
+                         if key not in ('library', 'harness', 'threads')})
+        manifest['timing_policy']['minimum_untimed_priming_ms'] = 3000
+        suite = yaml.safe_load((fixture / 'benchmarks/suites/fixture-kernels.yaml').read_text())
+        rows = report_run.read_rows([self.root / name for name in narrowed['result_files']])
+        text = report_run.render(manifest, suite, rows, self.root)
+        self.assertNotIn('Every timed cell matches', text)
+        self.assertIn('Every verified cell matches a successful verification census', text)
+        self.assertIn('Verification was narrowed (`verification.grid`): only the shapes n = 2 were verified',
+                      text)
+        self.assertIn('were timed and had to succeed', text)    # v2 evidence refuses a skipped one
+
+    def test_an_unverified_cell_carries_the_same_notes_in_every_process_set(self):
+        # Which notes an unverified cell carries is not guessed, but a variant timed in one process
+        # set only has a single process median, which the report cannot summarise; it is refused at
+        # validation instead of crashing the page at publish time.
+        manifest = self.narrowed('lu', ['', 'api-inclusive'], [''])
+        name = 'run1-small-1t.csv'
+        rows = self.rows(name)
+        extra = [r | {'note': 'api-inclusive'} for r in rows if r['n'] == '4']
+        # keep the engine order of the n=4 case: each engine's variant row follows its plain row
+        ordered = [x for r in rows for x in ([r] + [e for e in extra if e['row'] == r['row']]
+                                              if r['n'] == '4' else [r])]
+        self.write(name, ordered)
+        with self.assertRaisesRegex(ValueError, 'another process set'):
+            self.validate(manifest)
+        # the same variant in every process set is accepted: test_an_unverified_shape_may_carry_separately_timed_variants

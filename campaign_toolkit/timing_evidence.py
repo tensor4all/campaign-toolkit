@@ -114,6 +114,11 @@ def validate(manifest, run_dir):
               for pop in manifest['run_spec']['populations']
               for t in manifest['threads']['counts']}
     seen_groups = set()
+    # The notes an unverified cell carries are not compared with anything checked, but they must be
+    # the same in every process set of its group: a variant timed in one set only would leave the
+    # report a single process median for it, which it cannot summarise (and must not pass off as
+    # repeated). No note set is guessed; the first file of the group fixes it for the others.
+    unverified_notes = {}
     for name in manifest['result_files']:
         match = re.match(r'^run(\d+)-', name)
         if not match or int(match[1]) not in range(repeats):
@@ -128,15 +133,14 @@ def validate(manifest, run_dir):
             raise ValueError(f'{name}: duplicate or unexpected process group')
         seen_groups.add((repeat, group))
         expected = {key: status for key, status in census.items() if (key[0], key[9]) == group}
-        if grid:
-            # A narrowed verify leaves declared cells unverified - a larger shape of a family that
-            # was checked below it. They are still declared and must appear and succeed; what they
-            # do not get is a status comparison, because there is no verified status for them.
-            # `expected_cells` carries the ten base cells; a census key adds the note, which is
-            # empty for a cell that was never checked.
-            here = {key + ('',) for key in expected_cells(manifest) if (key[0], key[9]) == group}
-            for key in here - set(expected):
-                expected[key] = 'ok'
+        # A narrowed verify leaves declared cells unverified - a larger shape of a family that was
+        # checked below it. They are still declared and must appear and succeed; what they do not
+        # get is a status comparison, because there is no verified status for them. Nor do they
+        # get a note comparison: which separately timed variants a cell emits is the harness's
+        # business, and nothing was checked that could say which notes to expect, so they are
+        # compared on the ten base cells only. Every checked cell keeps its exact census match.
+        unverified = ({key for key in expected_cells(manifest) if (key[0], key[9]) == group}
+                      - bases) if grid else set()
         actual = {}
         order_by_case = {}
         for row in rows:
@@ -165,8 +169,16 @@ def validate(manifest, run_dir):
                     raise ValueError(f'{name}: aggregate is inconsistent with chronological samples')
             elif row.get('samples_ms'):
                 raise ValueError(f'{name}: skipped row carries timing samples')
-        if actual != expected:
+        checked_rows = {key: status for key, status in actual.items() if key[:-1] not in unverified}
+        unverified_rows = {key: status for key, status in actual.items() if key[:-1] in unverified}
+        if (checked_rows != expected or {key[:-1] for key in unverified_rows} != unverified
+                or any(status != 'ok' for status in unverified_rows.values())):
             raise ValueError(f'{name}: missing, unexpected or status-changed timed cells')
+        for base in unverified:
+            notes = frozenset(key[-1] for key in unverified_rows if key[:-1] == base)
+            if unverified_notes.setdefault((group, base), notes) != notes:
+                raise ValueError(f'{name}: unverified cell {base} carries notes {sorted(notes)}, '
+                                 f'another process set {sorted(unverified_notes[(group, base)])}')
         rotation = repeat % len(engines)
         wanted_order = engines[rotation:] + engines[:rotation]
         if any(order != wanted_order for order in order_by_case.values()):
