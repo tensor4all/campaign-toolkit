@@ -392,7 +392,8 @@ def render(manifest, suite, rows, run_dir):
                                    for t, c in sorted(manifest["threads"]["cpu_sets"].items(),
                                                       key=lambda kv: int(kv[0]))),
         "",
-        *(d.verify_note().replace("{binary}", d.measured["binary"]).splitlines() if not v2 else [
+        # from the merged `report`, so `aliases.report` can restore a pre-rename verify note too
+        *((report.get("verify_note") or descriptor.DEFAULT_VERIFY_NOTE).replace("{binary}", d.measured["binary"]).splitlines() if not v2 else [
             'Every timed cell matches a successful verification census, including operation variants.',
             'Each cell is median of process medians ± sample SD of those medians; W is the median',
             'within-process sample SD. All values are milliseconds. These are descriptive spreads,',

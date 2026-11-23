@@ -528,9 +528,13 @@ def write_site(site_root, pins=(), repo_ref='main', title=None, intro=None, extr
                     render_page(page, site_root, root, blob, repo_ref, heading)
                     current.append(page)
                     arm = f" <span class=\"muted\">{html.escape(c['vendor'])}</span>" if c['vendor'] else ''
-                    # The cell's suite under its current name: a page recorded before a rename
-                    # sits under the historical directory, which the link still points at.
-                    label = f"{profile}/{c['suite']}/{page.name}"
+                    # The page's path with its suite directory under the current name: a page
+                    # recorded before a rename sits under the historical directory, which the
+                    # link still points at.
+                    parts = list(page.relative_to(site_root).parts)
+                    if len(parts) >= 2:
+                        parts[-2] = c['suite']
+                    label = '/'.join(parts)
                     items.append(_page_item(page, site_root, root, blob, repo_ref, arm, label))
             missing = [(c['suite'], c['vendor'] or '') for c in cells if not c['page']]
             shown += len(items)

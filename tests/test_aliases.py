@@ -155,7 +155,10 @@ class AliasedCampaignTest(unittest.TestCase):
         data = yaml.safe_load(renamed_desc)
         old_label = data["report"]["provider_label"]
         data["report"]["provider_label"] = old_label + " (renamed)"
+        old_note = data["report"].get("verify_note")
+        data["report"]["verify_note"] = "A reworded verify note for {binary}."
         data["aliases"]["report"] = {"provider_label": old_label}
+        data["aliases"]["report"]["verify_note"] = old_note or descriptor.DEFAULT_VERIFY_NOTE
         desc.write_text(yaml.safe_dump(data, sort_keys=False))
         test_toolkit.git(self.root, "add", "-A")
         test_toolkit.git(self.root, "commit", "-qm", "rename")
