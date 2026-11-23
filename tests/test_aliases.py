@@ -185,6 +185,16 @@ class AliasedCampaignTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("differs from what report_run writes from its CSVs", out)
 
+        # Without the history the old declaration cannot be read: say so, and write nothing.
+        shutil.rmtree(self.root / ".git")
+        code, out = run()
+        self.assertEqual(code, 1)
+        self.assertIn("cannot read the declaration", out)
+        before = (self.root / RUN_A_REL / "report.md").read_bytes()
+        with self.assertRaises(SystemExit):
+            report_run.main(["--run-dir", str(self.root / RUN_A_REL)], root=self.root)
+        self.assertEqual((self.root / RUN_A_REL / "report.md").read_bytes(), before)
+
     def test_chart_cells_from_old_rows_are_keyed_by_the_current_engine(self):
         import test_candidate
         from campaign_toolkit import throughput
@@ -206,7 +216,10 @@ class AliasedCampaignTest(unittest.TestCase):
         run = (self.root / RUN_A_REL).resolve()
         manifest = campaign.load(run / "run.yaml")
         rows = report_run.read_rows([run / f for f in manifest["result_files"]])
-        text = report_run.render(manifest, report_run.declaration_for(manifest), rows, run)
+        # rendered against the renamed file (this fixture has no git history; the rename changed
+        # names only, so it prints what the recorded one did)
+        suite = campaign.load(descriptor.current().suite_path(manifest["suite_id"]))
+        text = report_run.render(manifest, suite, rows, run)
         self.assertNotIn("NEWLABEL", text)
         self.assertEqual(text.encode(), self.report_before)
 

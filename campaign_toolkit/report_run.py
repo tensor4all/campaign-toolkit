@@ -599,8 +599,16 @@ def declaration_for(manifest):
     d = descriptor.current()
     if manifest["suite_id"] != d.canonical_suite(manifest["suite_id"]):
         found = recorded_declaration(d, manifest)
-        if found is not None:
-            return found
+        if found is None:
+            # Rendering against the renamed file would print prose the run never recorded, and a
+            # "differs" finding (or a rewritten report) would follow from a missing history, not
+            # from the data. Refuse, and say what is missing.
+            raise SystemExit(
+                f"cannot read the declaration run under suite {manifest['suite_id']!r} recorded "
+                f"(suite_sha256 {manifest.get('suite_sha256')}): it was renamed to "
+                f"{d.canonical_suite(manifest['suite_id'])!r} and its old file is only in git history; "
+                f"a shallow clone or a checkout without git cannot read it (CI: fetch-depth: 0)")
+        return found
     return load(d.suite_path(manifest["suite_id"]))
 
 
