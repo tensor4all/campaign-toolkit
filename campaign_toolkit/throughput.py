@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from . import charts
+from . import charts, descriptor
 
 
 PLOTTABLE_NOTES = frozenset({"", "api-inclusive"})
@@ -36,7 +36,10 @@ def load_run(run_dir, dtype='f64', order='c'):
                     continue
                 if row['m'] != row['n']:
                     continue
-                cells[(int(row['threads']), row['family'], int(row['n']), row['note'], row['row'])][repeat] = \
+                # The series name engines by their current names, so a run recorded under a
+                # historical engine name draws on the same line as a new one.
+                engine = descriptor.canonical_engine(row['row'])
+                cells[(int(row['threads']), row['family'], int(row['n']), row['note'], engine)][repeat] = \
                     statistics.median(json.loads(row['samples_ms']))
     return cells
 
@@ -48,6 +51,9 @@ def points(cells, threads, family, engine, coefficient, complex_dtype=False):
     # modes), and plotting both makes a vertical stack at one x. Prefer the
     # plain row; the api-inclusive row is the fallback for vendor rows only.
     chosen = {}
+    # The cells are keyed by current engine names (`load_run`); a config naming a historical
+    # engine draws the same line rather than an empty one.
+    engine = descriptor.canonical_engine(engine)
     for (t, f, size, note, row), medians in sorted(cells.items()):
         if t != threads or f != family or row != engine or note not in PLOTTABLE_NOTES:
             continue
@@ -126,7 +132,7 @@ def revisions_line(run_dirs, labels=None):
             missing.append((labels[index] if labels and index < len(labels) else f'run {index}'))
             continue
         manifest = yaml.safe_load((Path(run_dir) / 'run.yaml').read_text())
-        role = 'large tier' if 'large' in str(manifest.get('suite_id', '')) else 'daily'
+        role = 'large tier' if 'large' in descriptor.canonical_suite(str(manifest.get('suite_id', ''))) else 'daily'
         short = lambda block: str((manifest.get(block) or {}).get('commit') or 'none')[:7]  # noqa: E731
         parts.append(f'{role} {manifest.get("vendor", {}).get("name", "?")}: fork `{short("library")}`, '
                      f'upstream `{short("upstream")}`, harness `{short("harness")}`')

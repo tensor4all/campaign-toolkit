@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 from . import descriptor, jsonschema_lite
-from .campaign import (engines_for_vendor, find_suite, load, populations,
+from .campaign import (canonical_engines, engines_for_vendor, find_suite, load, populations,
                        same_populations, vendor_engines, vendor_of_engines)
 
 
@@ -35,7 +35,8 @@ def declaration_drifted(manifest, suite_file):
         return True
     import hashlib
     current = hashlib.sha256(pathlib.Path(suite_file).read_bytes()).hexdigest()
-    return recorded != current
+    # A rename that changed only names maps the recorded hash to the renamed file's (`aliases`).
+    return descriptor.current().canonical_suite_sha(recorded) != current
 
 
 def check_vendor(manifest, errors):
@@ -138,7 +139,11 @@ def check_declaration(manifest, suite, spec, errors):
             if batch not in want["batch"]:
                 errors.append(f"run_spec.populations[{population['regime']}] contains batch "
                               f"{batch!r}, which the suite does not declare for that regime")
-    declared_engines = engines_for_vendor(suite, vendor_of_engines(rs.get("engines", [])) or "")
+    # Engines are compared under their current names: a run recorded under a historical engine
+    # name measured the engine its current name declares.
+    declared_engines = canonical_engines(
+        engines_for_vendor(suite, vendor_of_engines(rs.get("engines", [])) or ""))
+    recorded_engines = canonical_engines(rs.get("engines", []))
     # A declared axis (`order`, in the campaigns that declare one) is checked the same way as
     # the dtype list: a value the suite does not declare is not part of any cell.
     for key, declared_values in (("dtypes", spec["dtypes"]),
@@ -146,7 +151,7 @@ def check_declaration(manifest, suite, spec, errors):
                                  ("engines", declared_engines)):
         if declared_values is None:
             continue
-        for v in rs.get(key, []):
+        for v in (recorded_engines if key == "engines" else rs.get(key, [])):
             if v not in declared_values:
                 errors.append(f"run_spec.{key} contains {v!r}, which the suite does not declare "
                               f"for a run of this vendor arm")
@@ -154,7 +159,7 @@ def check_declaration(manifest, suite, spec, errors):
               and manifest["threads"]["counts"] == spec["threads"]
               and rs.get("dtypes") == spec["dtypes"]
               and rs.get("order", []) == spec.get("order", [])
-              and rs.get("engines") == declared_engines)
+              and recorded_engines == declared_engines)
     if rs.get("covers_declared_suite") != covers:
         errors.append(f"run_spec.covers_declared_suite should be {covers}")
 
@@ -220,7 +225,14 @@ def validate(path, check_git=True, allow_pre_release=False):
             # root; resolving against the process's working directory would make
             # validation depend on where it happens to be run from.
             declared = descriptor.root() / declared
-        if declared.resolve() != suite_file.resolve():
+        # A run recorded before its suite was renamed names the declaration by its historical
+        # file name, which no longer exists: accepted only when the manifest's suite_id is itself a
+        # historical id of this suite and the file named is exactly `<suites_dir>/<that id>.yaml`.
+        old_file = suite_file.parent / f"{manifest['suite_id']}.yaml"
+        historical = (manifest["suite_id"] != suite["id"]
+                      and declared.resolve() == old_file.resolve()
+                      and not old_file.exists())     # a file still there is another declaration
+        if declared.resolve() != suite_file.resolve() and not historical:
             errors.append(f"suite_file {declared} is not the declaration for {manifest['suite_id']!r} ({suite_file})")
         check_vendor(manifest, errors)
         if manifest["target_profile"] not in suite["required_profiles"] + suite.get("optional_profiles", []):

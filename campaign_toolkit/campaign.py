@@ -31,15 +31,39 @@ def load(path) -> dict:
 
 
 def provider_of(engine: str) -> "str | None":
-    """What provides an engine name the harness emits."""
-    return desc().engines.get(engine)
+    """What provides an engine name the harness emits, under its current or a historical name.
+
+    A historical engine name resolves to the provider its current name declares, so a run
+    recorded before a rename still has a vendor arm and a measured provider.
+    """
+    engines = desc().engines
+    return engines.get(engine) or engines.get(desc().canonical_engine(engine))
+
+
+def same_name(recorded: "str | None", current: "str | None") -> bool:
+    """True when two engine or provider names are one name, either side possibly historical."""
+    if recorded is None or current is None:
+        return recorded == current
+    d = desc()
+    return d.canonical_engine(recorded) == d.canonical_engine(current)
+
+
+def canonical_engines(engines) -> list:
+    """An engine list with every historical name replaced by its current one, order kept."""
+    return [desc().canonical_engine(e) for e in engines]
+
+
+def suite_of(manifest: dict) -> str:
+    """The current id of the suite a manifest was recorded under."""
+    return desc().canonical_suite(manifest["suite_id"])
 
 
 def find_suite(suite_id: str):
-    """The declaration file and body whose `id` is `suite_id`."""
+    """The declaration file and body of a suite, named by its current or a historical id."""
+    want = desc().canonical_suite(suite_id)
     for f in sorted(desc().suites_dir.glob("*.yaml")):
         data = load(f)
-        if data["id"] == suite_id:
+        if data["id"] == want:
             return f, data
     return None, None
 
@@ -226,14 +250,15 @@ def cell_of(row: dict) -> Cell:
     """One CSV row as a cell key.
 
     `k` is read whenever the descriptor declares the column, so a three-index shape is
-    distinguished from a two-index one; it is empty for every other family.
+    distinguished from a two-index one; it is empty for every other family. The engine is keyed
+    by its current name, so a run recorded under a historical name compares with a new one.
     """
     d = desc()
     k = row.get("k", "") if "k" in d.csv_columns else ""
     return Cell(row["regime"], row["family"], row["dtype"],
                 tuple(row[axis] for axis in d.case_axes),
                 int(row["m"]), int(row["n"]), k,
-                int(row["batch"]), row["row"], int(row["threads"]))
+                int(row["batch"]), d.canonical_engine(row["row"]), int(row["threads"]))
 
 
 def case_dims(m: int, n: int, k: str = "") -> str:
@@ -270,18 +295,20 @@ def coverage_of(suite: dict, manifest: dict) -> str:
     if not got:
         return "declaration-changed"
     subset = all(population_covers(p, want) for p in got)
-    declared_engines = set(engines_for_vendor(suite, arm))
+    # A run recorded under a historical engine name covers the engine of its current name.
+    recorded = canonical_engines(rs.get("engines", []))
+    declared_engines = canonical_engines(engines_for_vendor(suite, arm))
     if not (subset
             and set(manifest["threads"]["counts"]) <= set(spec["threads"])
             and set(rs.get("dtypes", [])) <= set(spec["dtypes"])
             and set(rs.get("order", [])) <= set(spec.get("order", []))
-            and set(rs.get("engines", [])) <= declared_engines):
+            and set(recorded) <= set(declared_engines)):
         return "declaration-changed"
     full = (same_populations(got, want)
             and manifest["threads"]["counts"] == spec["threads"]
             and rs.get("dtypes") == spec["dtypes"]
             and rs.get("order", []) == spec.get("order", [])
-            and rs.get("engines") == engines_for_vendor(suite, arm))
+            and recorded == declared_engines)
     return "full" if full else "partial"
 
 

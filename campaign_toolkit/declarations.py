@@ -60,6 +60,21 @@ def check_profile(profile) -> list:
     return problems
 
 
+def check_aliases(d, suite_ids) -> list:
+    """A historical name points at a current one, and is not itself a current name."""
+    problems = []
+    for old, new in d.aliases["suites"].items():
+        if new not in suite_ids:
+            problems.append(f"aliases.suites: {old!r} -> {new!r}, which no suite under "
+                            f"{d.data['suites_dir']} declares")
+    for old, new in d.aliases["engines"].items():
+        if new not in d.engines:
+            problems.append(f"aliases.engines: {old!r} -> {new!r}, which the descriptor's engines do not declare")
+        if old in d.engines:
+            problems.append(f"aliases.engines: {old!r} is both a historical and a current engine name")
+    return problems
+
+
 def check(root, out=None) -> list:
     out = out or sys.stdout
     d = descriptor.set_root(root)
@@ -70,6 +85,12 @@ def check(root, out=None) -> list:
     suites = sorted(d.suites_dir.glob("*.yaml"))
     if not suites:
         problems.append(f"{d.suites_dir} declares no suites")
+    ids = set()
+    for path in suites:
+        data = load(path)
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            ids.add(data["id"])                 # anything else is reported by the schema below
+    problems += check_aliases(d, ids)
     for path in suites:
         suite = load(path)
         try:
@@ -99,10 +120,16 @@ def check(root, out=None) -> list:
                     problems.append(f"{path}: vendor_families[{provider}] names unknown families "
                                     f"{sorted(set(only) - known)}")
             for engine in spec["engines"]:
-                if engine not in engines:
+                # A suite still written under a historical engine name declares the current engine.
+                if engine not in engines and d.canonical_engine(engine) not in engines:
                     problems.append(f"{path}: engine {engine!r} is not declared by the descriptor")
-                elif engine not in suite["engines_doc"]:
+                elif (engine not in suite["engines_doc"]
+                      and d.canonical_engine(engine) not in suite["engines_doc"]):
                     problems.append(f"{path}: engine {engine!r} has no engines_doc entry")
+        if suite["id"] in d.aliases["suites"]:
+            problems.append(f"{path}: suite id {suite['id']!r} is also a historical name "
+                            f"(aliases.suites maps it to {d.aliases['suites'][suite['id']]!r}); "
+                            f"a name means one suite")
         named = list(dict.fromkeys(suite["required_profiles"] + suite.get("optional_profiles", [])))
         for profile in named:
             if profile not in profiles:

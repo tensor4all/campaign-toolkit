@@ -11,7 +11,9 @@ is the check that nobody edited it by hand:
 2. every run changed since `--base` (or each `--run`, or every run with `--all`) regenerates its
    `report.md` from its CSVs byte for byte. Only changed runs, because a report written by an
    older toolkit is not expected to match today's renderer, and regenerating every run on every
-   push would be the expensive part of CI;
+   push would be the expensive part of CI. A run recorded under a historical suite id (renamed,
+   `aliases.suites`) is rendered against the declaration it recorded, as `report_run` renders it
+   (`report_run.declaration_for`);
 3. the index is current (`gen_index --check`).
 
 Charts, comparisons and trends are not committed (the site generates them), so there is nothing
@@ -98,7 +100,9 @@ def check_report(d, run_dir):
         return []          # a run recorded without a report (raw data only) has nothing to compare
     try:
         manifest = load(run_dir / 'run.yaml')
-        suite = load(d.suite_path(manifest['suite_id']))
+        # The declaration the run was recorded under, when git still has it: a renamed or edited
+        # declaration prints different prose, and a report is regenerated to check its numbers.
+        suite = report_run.declaration_for(manifest, exact=False)
         rows = report_run.read_rows([run_dir / f for f in manifest.get('result_files') or []])
         text = report_run.render(manifest, suite, rows, run_dir)
     except (SystemExit, Exception) as error:    # every failure is a finding here

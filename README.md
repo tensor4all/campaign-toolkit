@@ -267,6 +267,46 @@ uses the `markdown` package.
 
 ## Charts, trends and the generated-file check
 
+### Renaming a suite or an engine
+
+A recording is never rewritten, so a run recorded before a rename keeps its directory, its
+manifest, its CSV rows and its report under the old names. The descriptor maps them:
+
+```yaml
+aliases:
+  suites: {faer-kernels: colmat-kernels}     # historical suite id -> current id (a suites_dir file)
+  engines: {faer-fork: colmat}               # historical engine/provider name -> a key of engines
+  suite_sha256: {<recorded sha>: <sha of the renamed file>}   # only when the rename changed names only
+  report: {provider_label: faer rows}        # report labels as a pre-rename run printed them
+```
+
+A run recorded under a historical suite id is rendered, by `report_run` and by `check_generated`
+alike (`report_run.declaration_for`), against the declaration it recorded: the blob whose sha256
+is its `suite_sha256`, read back from git. If that exact file is unreachable, `report_run`
+refuses to write, and `check_generated` compares against the newest file under the historical id
+(it writes nothing). It is
+rendered with the `aliases.report` labels. So an old run's report still regenerates byte for
+byte and its numbers stay checked. A campaign without `aliases` renders against the current
+declaration, as before. Reading the recorded declaration back needs the repository's history (`fetch-depth: 0` in CI);
+without it, or without git, `report_run` and `check_generated` refuse such a run with that cause
+instead of rendering it against the renamed file. A `suite_sha256` entry is the
+campaign's assertion that only names changed; the toolkit does not compare the two grids.
+
+A rename rewrites the suite file, so without `suite_sha256` every run recorded under the old file
+reads as measured under another declaration: the validator skips its declaration-derived checks and
+`candidate` refuses to compare it with a run recorded after the rename. The entry states that the
+old declaration and the renamed file declare the same grid. It holds only while that file is byte
+for byte the same; a later edit gives it a new hash and the old runs read as drifted again.
+
+The readers that look a name up (`find_suite`, `suite_path`, `provider_of`, the validator's
+`suite_file` check, the report's engine documentation) accept either name, and the readers that
+aggregate (`gen_index`, the site, the charts, the trend, `cell_of` and the comparisons) print the
+current one, so an old run and a new run of one suite land in the same cell. A regenerated old
+report still prints the names its rows carry. The recorder records
+under the current names, whichever one it is given. The site's HTML copy of a record kept under a
+historical suite directory opens with a one-line key from the old names to the current ones.
+`declarations` refuses an alias that points at nothing, or one whose old name is still current.
+
 Charts are generated when the site is built, from the runs behind the current pages, and are
 not committed. The descriptor declares them (all optional):
 

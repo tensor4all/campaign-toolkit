@@ -23,7 +23,7 @@ import statistics
 
 import yaml
 
-from . import timing_evidence
+from . import descriptor, timing_evidence
 
 IDENTITY_KEYS = ('upstream', 'harness', 'toolkit')
 HOST_KEYS = ('cpu', 'logical_cpus', 'l3', 'l3_domains', 'hostname', 'arch')
@@ -33,13 +33,23 @@ def _manifest(run_dir):
     return yaml.safe_load((pathlib.Path(run_dir) / 'run.yaml').read_text())
 
 
+def _canonical_sha(sha):
+    """A recorded declaration hash through the campaign's `aliases.suite_sha256`, if any."""
+    try:
+        return descriptor.current().canonical_suite_sha(sha)
+    except descriptor.DescriptorError:
+        return sha
+
+
 def identity_differences(baseline, candidate):
     """[] when the candidate run may be compared with the baseline; a list of reasons otherwise."""
     baseline, candidate = _manifest(baseline), _manifest(candidate)
     out = []
-    if baseline.get('suite_id') != candidate.get('suite_id'):
+    if (descriptor.canonical_suite(str(baseline.get('suite_id')))
+            != descriptor.canonical_suite(str(candidate.get('suite_id')))):
         out.append(f"suite: {baseline.get('suite_id')!r} vs {candidate.get('suite_id')!r}")
-    if baseline.get('suite_sha256') != candidate.get('suite_sha256'):
+    if (_canonical_sha(baseline.get('suite_sha256'))
+            != _canonical_sha(candidate.get('suite_sha256'))):
         out.append('the suite declaration changed between the runs')
     for key in IDENTITY_KEYS:
         one, two = baseline.get(key) or {}, candidate.get(key) or {}
@@ -111,13 +121,15 @@ def _series(run_dir, engine, repetitions):
         repeat = name.split('-')[0]
         with (run_dir / name).open(newline='') as handle:
             for row in csv.DictReader(handle):
-                if row['row'] != engine:
+                if descriptor.canonical_engine(row['row']) != descriptor.canonical_engine(engine):
                     continue
                 # The memory order is part of a cell's identity: an optimization that only
                 # changes the row-major path must never be averaged with the column-major one.
                 key = (int(row['threads']), row['family'], row['dtype'], row['order'],
                        f"{row['m']}x{row['n']}" + (f"x{row['k']}" if row['k'] else ''), row['note'])
-                identity = timing_evidence.cell(row)
+                # The cell's identity under the engine's current name, so a baseline recorded
+                # before a rename pairs with a candidate recorded after it.
+                identity = timing_evidence.cell({**row, 'row': descriptor.canonical_engine(row['row'])})
                 if identities.setdefault(key, identity) != identity:
                     raise ValueError(f'{engine}: distinct recorded cells share the projected key '
                                      f'{key}: {identities[key]} vs {identity}')

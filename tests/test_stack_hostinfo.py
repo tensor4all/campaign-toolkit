@@ -324,7 +324,7 @@ class SyncPinsTest(unittest.TestCase):
         self.repo = self.tmp / "colmat-benchmark"
         # What the pin must hold: the library's commit, or the stack's `measured` hold.
         use = next(u for u in stackmod.repository(self.stack, "colmat-benchmark")["consumes"]
-                   if u["file"] == "pins/t4a-faer.rev")
+                   if u["file"] == "pins/colmat.rev")
         self.t4a = stackmod.expected(self.stack, use)
 
     def run_sync(self, *args):
@@ -333,7 +333,7 @@ class SyncPinsTest(unittest.TestCase):
         return code, out.getvalue()
 
     def matching(self):
-        write(self.repo, "pins/t4a-faer.rev", f"# how it was found\n{self.t4a}\n")
+        write(self.repo, "pins/colmat.rev", f"# how it was found\n{self.t4a}\n")
         write(self.repo, "pins/upstream-faer.rev", "# tag\nfaer-v0.24.4\n")
 
     def test_matching_repository_passes_the_check(self):
@@ -343,12 +343,12 @@ class SyncPinsTest(unittest.TestCase):
 
     def test_a_differing_pin_fails_the_check_and_is_named(self):
         self.matching()
-        write(self.repo, "pins/t4a-faer.rev", "# old\n" + "1" * 40 + "\n")
+        write(self.repo, "pins/colmat.rev", "# old\n" + "1" * 40 + "\n")
         code, out = self.run_sync("--check")
         self.assertEqual(code, 1)
-        self.assertIn("pins/t4a-faer.rev", out)
+        self.assertIn("pins/colmat.rev", out)
         self.assertIn("1" * 40, out)
-        self.assertEqual((self.repo / "pins/t4a-faer.rev").read_text(), "# old\n" + "1" * 40 + "\n")  # untouched
+        self.assertEqual((self.repo / "pins/colmat.rev").read_text(), "# old\n" + "1" * 40 + "\n")  # untouched
 
     def test_a_missing_file_fails_the_check(self):
         self.matching()
@@ -358,10 +358,10 @@ class SyncPinsTest(unittest.TestCase):
         self.assertIn("pins/upstream-faer.rev: stack says faer-v0.24.4; missing file", out)
 
     def test_sync_writes_the_value_and_keeps_comments_and_missing_newline(self):
-        write(self.repo, "pins/t4a-faer.rev", "# history\n# more\n" + "1" * 40)          # no trailing newline
+        write(self.repo, "pins/colmat.rev", "# history\n# more\n" + "1" * 40)          # no trailing newline
         code, _ = self.run_sync()
         self.assertEqual(code, 0)
-        self.assertEqual((self.repo / "pins/t4a-faer.rev").read_text(), f"# history\n# more\n{self.t4a}")
+        self.assertEqual((self.repo / "pins/colmat.rev").read_text(), f"# history\n# more\n{self.t4a}")
         self.assertEqual((self.repo / "pins/upstream-faer.rev").read_text().splitlines()[-1], "faer-v0.24.4")
         self.assertTrue((self.repo / "pins/upstream-faer.rev").read_text().endswith("\n"))
         self.assertEqual(self.run_sync("--check")[0], 0)

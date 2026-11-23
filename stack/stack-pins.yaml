@@ -101,13 +101,12 @@ repositories:
   - name: colmat-benchmark
     consumes:
       - kind: rev-file
-        file: pins/t4a-faer.rev
+        file: pins/colmat.rev
         library: colmat
         field: commit
         # The 2026-11-17 baseline publication records the daily suite on both vendor arms and the
         # large suite on MKL at 93da6217 (colmat-rs main), so the pin follows the measured revision.
-        # The pin file keeps its historical name: renaming it is a cross-repo path change with no
-        # measurement value.
+        # The file was `pins/t4a-faer.rev` until colmat-benchmark#113 named it after the library.
       - {kind: rev-file, file: pins/upstream-faer.rev, library: faer-upstream, field: tag}
     run_dirs: [data/results/*/*/*]
   - name: tlinalg-benchmark

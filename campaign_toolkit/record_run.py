@@ -40,8 +40,8 @@ import yaml
 
 from . import descriptor, hostinfo, observer_audit
 from . import link_preflight
-from .campaign import (check_cpu_sets, cpu_sets_for, engines_for_vendor, populations, provider_of,
-                       same_populations, vendor_engines)
+from .campaign import (canonical_engines, check_cpu_sets, cpu_sets_for, engines_for_vendor, populations,
+                       provider_of, same_populations, vendor_engines)
 
 
 def sh(cmd, **kw):
@@ -823,6 +823,15 @@ def require_commits_on_remote(sources, label=None):
                      f"--allow-local-commits for a throwaway probe, which can never be published).")
 
 
+def covers_declared_engines(engines, suite, arm) -> bool:
+    """Whether a run's engines are this arm's declared engines, compared under current names.
+
+    The same comparison `coverage_of` and the validator make: a suite may still list a historical
+    engine name, and the recorder records under the current one.
+    """
+    return canonical_engines(engines) == canonical_engines(engines_for_vendor(suite, arm))
+
+
 def main(argv=None, root=None):
     if root is not None:
         descriptor.set_root(root)
@@ -875,6 +884,12 @@ def main(argv=None, root=None):
     if args.pre_release and not args.no_publish:
         ap.error('--pre-release requires --no-publish; pre-release runs cannot be published')
 
+    # A new recording is made under the current names: a historical suite id or engine name on
+    # the command line is the suite or engine it was renamed to, and the run says so.
+    if d.canonical_suite(args.suite_id) != args.suite_id:
+        print(f"note: suite {args.suite_id!r} was renamed; recording under {d.canonical_suite(args.suite_id)!r}",
+              file=sys.stderr)
+        args.suite_id = d.canonical_suite(args.suite_id)
     profiles = d.profiles()
     suite = yaml.safe_load(d.suite_path(args.suite_id).read_text())
     spec = suite["runs"][0]
@@ -927,6 +942,11 @@ def main(argv=None, root=None):
     # The engines this arm is expected to measure: the measured provider's rows every arm carries,
     # plus this arm's own vendor row. Anything else is another binary's to measure.
     engines = args.engines.split(",") if args.engines else engines_for_vendor(suite, arm)
+    renamed = [e for e in engines if d.canonical_engine(e) != e]
+    if renamed:
+        print(f"note: engine(s) {renamed} were renamed; recording under "
+              f"{[d.canonical_engine(e) for e in renamed]}", file=sys.stderr)
+        engines = [d.canonical_engine(e) for e in engines]
     external = (load_external_providers(args.external_provider_json)
                 if args.external_provider_json else [])
     require_external_identities(engines, external)
@@ -1273,7 +1293,7 @@ def main(argv=None, root=None):
             "covers_declared_suite": (threads == spec["threads"]
                                       and dtypes == spec["dtypes"]
                                       and order == spec.get("order", [])
-                                      and engines == engines_for_vendor(suite, arm)
+                                      and covers_declared_engines(engines, suite, arm)
                                       and same_populations(covered, declared)),
         },
     }

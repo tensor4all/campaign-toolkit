@@ -10,14 +10,18 @@ into a discussion without its commit is the thing this repository exists to stop
 """
 import argparse
 import csv
+import hashlib
 import itertools
 import math
 import pathlib
 import statistics
+import subprocess
 import sys
 
+import yaml
+
 from . import descriptor
-from .campaign import case_dims, load, provider_of
+from .campaign import case_dims, load, provider_of, same_name
 
 
 def columns():
@@ -222,14 +226,15 @@ def comparison_verdict(best, within, key, row_names):
     return out
 
 
-def row_label(engine):
+def row_label(engine, report=None):
     """The name a row is printed under: the descriptor's `report.row_labels`, or the row itself.
 
     The harness names a row after what it measures (a provider variant, an order), and a campaign
     whose table is a competition may want to print the library's name instead. The key stays the
     row's own name: only the label changes.
     """
-    return (descriptor.current().report.get('row_labels') or {}).get(engine, engine)
+    report = descriptor.current().report if report is None else report
+    return (report.get('row_labels') or {}).get(engine, engine)
 
 
 def verdict_text(verdict, fork_us, other, subject='fork'):
@@ -272,15 +277,23 @@ def render(manifest, suite, rows, run_dir):
     d = descriptor.current()
     axes = report_axes(rows, manifest['timing_policy'])
     report = d.report
+    # A run recorded under historical names printed the labels of its time: `aliases.report`
+    # overrides `report` fields for it, so its report regenerates as it was written.
+    recorded_engines = manifest.get("run_spec", {}).get("engines", [])
+    if (manifest.get("suite_id") in d.aliases["suites"]
+            or any(e in d.aliases["engines"] for e in recorded_engines)):
+        report = {**report, **d.aliases["report"]}
     vendor = manifest.get("vendor") or {}
     library = manifest["library"]
     upstream = manifest.get("upstream") or {}
     providers = manifest.get("providers", [])
+    # A run recorded before an engine rename names its providers by the historical name; they are
+    # the providers of the current name, and the page keeps printing the name it recorded.
     deps = ([p for p in providers if p["name"] in d.provider_packages]
-            or [p for p in providers if p["name"] in d.measured_providers])
+            or [p for p in providers if d.canonical_engine(p["name"]) in d.measured_providers])
     # An external provider is not a Cargo dependency of the measured checkout, so it is printed
     # on its own line rather than left to the dependency selection to include or drop.
-    external = [p for p in providers if p["name"] in d.external_providers]
+    external = [p for p in providers if d.canonical_engine(p["name"]) in d.external_providers]
     engines = manifest["run_spec"]["engines"]
     # The columns are the engines this run recorded measuring, in the declaration's order: a page
     # prints the arms it has, and a vendor arm has one LAPACK row because one binary links one
@@ -315,7 +328,9 @@ def render(manifest, suite, rows, run_dir):
                       + (" and had to succeed" if v2 else "")
                       + ", but no verification checked them; a population the grid does not name "
                       "was verified at every shape."] if narrowed_n else [])
-    verify_note = d.verify_note().replace("{binary}", d.measured["binary"])
+    # from the merged `report`, so `aliases.report` can restore a pre-rename verify note too
+    verify_note = (report.get("verify_note") or descriptor.DEFAULT_VERIFY_NOTE).replace(
+        "{binary}", d.measured["binary"])
     if narrowed_n:
         # The campaign's note describes the pass; on a narrowed run its "every row ... on the same
         # grid" opening would contradict the line above it, so it is scoped to the verified shapes.
@@ -377,7 +392,7 @@ def render(manifest, suite, rows, run_dir):
         out.append(f"  Known blind spot: {spot}")
     out += ["- **Rows** — one row per engine in every table below:"]
     for engine in row_names:
-        doc = suite["engines_doc"].get(engine)
+        doc = suite["engines_doc"].get(engine) or suite["engines_doc"].get(d.canonical_engine(engine))
         if doc is None:
             out.append(f"  - `{engine}` — (undocumented in the suite declaration)")
             continue
@@ -386,10 +401,10 @@ def render(manifest, suite, rows, run_dir):
         if doc.get("caveat"):
             out.append(f"    Caveat: {doc['caveat']}")
         if provider_of(engine) in d.measured_providers and deps:
-            own = [p for p in deps if p["name"] == provider_of(engine)]
+            own = [p for p in deps if same_name(p["name"], provider_of(engine))]
             out.append("    As measured: " + "; ".join(provider_text(p) for p in (own or deps)))
         if provider_of(engine) in d.external_providers:
-            own = [p for p in external if p["name"] == provider_of(engine)]
+            own = [p for p in external if same_name(p["name"], provider_of(engine))]
             if own:
                 out.append("    As measured: " + "; ".join(provider_text(p) for p in own))
         if engine == f"lapack-{vendor.get('name')}":
@@ -430,9 +445,9 @@ def render(manifest, suite, rows, run_dir):
             f"Each process retains {manifest['timing_policy']['repetitions']} chronological calls; "
             f"{manifest['run_spec']['aa']} complete process sets are recorded.",
             spread_guide_text(best, within),
-            *( [] if not descriptor.current().report.get('verdicts', True) else [
-                f"The `vs {row_label(row_names[0])}` column is the rotation-averaged ratio",
-                f"exp(mean over starts of log(engine median / {row_label(row_names[0])} median)),",
+            *( [] if not report.get('verdicts', True) else [
+                f"The `vs {row_label(row_names[0], report)}` column is the rotation-averaged ratio",
+                f"exp(mean over starts of log(engine median / {row_label(row_names[0], report)} median)),",
                 "with the per-start ratios beside it: `R > 1`",
                 'means the engine was slower than that first-declared row in that start. It removes a',
                 'row-position',
@@ -443,7 +458,7 @@ def render(manifest, suite, rows, run_dir):
             'per-start median range exceeds 5% of its median, and `p` a balanced cell whose estimated',
             'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
             'between-start variation can exceed the difference being compared.',
-            *( [] if not descriptor.current().report.get('verdicts', True) else [
+            *( [] if not report.get('verdicts', True) else [
                 'The `vs` columns mark only differences larger than the spread this run recorded for those',
                 'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
                 '`🔵 <row> X faster than <row>` / `🔴 <row> X slower than <row>` '
@@ -492,16 +507,16 @@ def render(manifest, suite, rows, run_dir):
                     # A campaign whose rows are two modes of one library carries no verdict: a
                     # ratio between two schedules of the same code is not a comparison between
                     # implementations, and a column of coloured ratios invites it to be read as one.
-                    verdicts_on = bool(descriptor.current().report.get("verdicts", True))
-                    out.append("| case | " + " | ".join(f"{row_label(e)} (ms)" for e in row_names) + " |"
+                    verdicts_on = bool(report.get("verdicts", True))
+                    out.append("| case | " + " | ".join(f"{row_label(e, report)} (ms)" for e in row_names) + " |"
                                + ("" if not v2 or not verdicts_on
-                                  else "".join(f" vs `{row_label(e)}` |" for e in row_names[1:]))
+                                  else "".join(f" vs `{row_label(e, report)}` |" for e in row_names[1:]))
                                + (" notes |" if v2 else " |"))
                     columns = (len(row_names) + (2 if not v2
                                                  else (2 + len(row_names) - 1 if verdicts_on else 1)))
                     out.append("|" + "---|" * columns)
-                    subject = (descriptor.current().report.get('subject')
-                               or row_label(row_names[0]))
+                    subject = (report.get('subject')
+                               or row_label(row_names[0], report))
                     for case in cases:
                         cells = []
                         key = (regime, case, dtype, *axis_values, threads)
@@ -520,7 +535,7 @@ def render(manifest, suite, rows, run_dir):
                                 verdicts = comparison_verdict(best, within, key, row_names)
                                 for engine in row_names[1:]:
                                     cells.append(verdict_text(
-                                        verdicts.get(engine), fork_us, row_label(engine), subject))
+                                        verdicts.get(engine), fork_us, row_label(engine, report), subject))
                             notes = []
                             if not balanced:
                                 notes.append('`*` one row has no measurement here')
@@ -569,16 +584,105 @@ def render(manifest, suite, rows, run_dir):
     return "\n".join(out).rstrip("\n") + "\n"
 
 
+def _git_lines(d, *args):
+    """stdout lines of a git command in the campaign root; [] without git."""
+    try:
+        return subprocess.run(['git', '-C', str(d.root), *args], capture_output=True, text=True).stdout.split()
+    except FileNotFoundError:
+        return []
+
+
+def _git_blob(d, commit, path):
+    try:
+        blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:./{path}'], capture_output=True)
+    except FileNotFoundError:
+        return None
+    return blob.stdout if blob.returncode == 0 else None
+
+
+def recorded_declaration(d, manifest):
+    """The suite declaration a run was recorded under, read back from git by its hash, or None.
+
+    A run records its declaration's `suite_sha256`. When the declaration has since moved -- an
+    edit, or a rename (`aliases.suites`), whose old file no longer exists -- its report printed the
+    old prose, so it can only regenerate from that exact file: the blob, under any of the suite's
+    names, whose sha256 is the recorded value. None when no such blob is reachable: the manifest
+    records no hash, the declaration it was recorded against was never committed, or there is no
+    history to read (a shallow clone, no git).
+    """
+    want = manifest.get('suite_sha256')
+    if not want:
+        return None
+    current = d.suite_path(manifest['suite_id'])
+    if current.exists() and hashlib.sha256(current.read_bytes()).hexdigest() == want:
+        return load(current)
+    names = d.suite_names(d.canonical_suite(manifest['suite_id']))
+    paths = [(d.suites_dir / f'{name}.yaml').relative_to(d.root).as_posix() for name in names]
+    for commit in _git_lines(d, 'log', '--all', '--format=%H', '--', *paths):
+        for path in paths:
+            blob = _git_blob(d, commit, path)
+            if blob is not None and hashlib.sha256(blob).hexdigest() == want:
+                return yaml.safe_load(blob)
+    return None
+
+
+def last_historical_declaration(d, manifest):
+    """The newest committed file under a run's historical suite id, or None.
+
+    Not the declaration the run recorded -- only the last one the campaign had under that name. It
+    is never used to write a report; `check_generated` compares against it when the exact one is not
+    reachable, and says so.
+    """
+    own = (d.suites_dir / f"{manifest['suite_id']}.yaml").relative_to(d.root).as_posix()
+    for commit in _git_lines(d, 'log', '--all', '--format=%H', '--', own):
+        blob = _git_blob(d, commit, own)
+        if blob is not None:
+            return yaml.safe_load(blob)
+    return None
+
+
+def declaration_for(manifest, exact=True):
+    """The suite declaration a run's report is rendered against.
+
+    The current declaration, except for a run recorded under a historical suite id (renamed,
+    `aliases.suites`): its report printed the declaration it was recorded under, which the rename
+    replaced, so it is rendered against that one (`recorded_declaration`). When that exact file
+    cannot be read, `report_run --run-dir` (exact=True) refuses -- writing a report from any other
+    file would print prose the run never recorded. `check_generated` (exact=False) compares instead
+    against the last file under the historical id, which writes nothing; a difference is then
+    reported as an ordinary "differs" finding.
+    """
+    d = descriptor.current()
+    if manifest["suite_id"] == d.canonical_suite(manifest["suite_id"]):
+        return load(d.suite_path(manifest["suite_id"]))
+    found = recorded_declaration(d, manifest)
+    if found is not None:
+        return found
+    if not exact:
+        fallback = last_historical_declaration(d, manifest)
+        if fallback is not None:
+            return fallback
+    if not manifest.get("suite_sha256"):
+        why = "the manifest records no suite_sha256, so the exact file cannot be identified"
+    else:
+        why = ("no reachable commit holds a file with its recorded suite_sha256 "
+               f"{manifest['suite_sha256']} (never committed, or a shallow clone / no git: "
+               "CI needs fetch-depth: 0)")
+    raise SystemExit(
+        f"cannot read the declaration run under suite {manifest['suite_id']!r} recorded: it was renamed "
+        f"to {d.canonical_suite(manifest['suite_id'])!r}, and {why}")
+
+
 def main(argv=None, root=None):
     if root is not None:
         descriptor.set_root(root)
-    d = descriptor.current()
+    descriptor.current()
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-dir", required=True)
     args = ap.parse_args(argv)
     run_dir = pathlib.Path(args.run_dir).resolve()
     manifest = load(run_dir / "run.yaml")
-    suite = load(d.suite_path(manifest["suite_id"]))
+    suite = declaration_for(manifest)
     # Exactly the files the manifest names, not every CSV that happens to be in the directory:
     # the manifest is what the validator checked, and a report built from anything else would
     # publish numbers nothing gated.
