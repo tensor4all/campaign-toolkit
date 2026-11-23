@@ -294,7 +294,7 @@ def baseline_line(manifest, below, baseline):
         return []
     version = manifest['timing_policy']['version']
     ratio = baseline.get('min_verdict_ratio')
-    reference = f" ({baseline['reference']})" if baseline.get('reference') else ""
+    reference = f", {baseline['reference']}" if baseline.get('reference') else ""
     return [f"- timing baseline: **not comparable with this campaign's v{version} pages** "
             f"({'; '.join(below)}; the frozen v{version} settings are priming {baseline['prime_ms']} ms "
             f"and {baseline['reps']} reps{reference}). Too little priming reads a few percent fast, so "
