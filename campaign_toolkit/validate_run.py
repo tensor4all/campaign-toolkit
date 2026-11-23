@@ -228,8 +228,10 @@ def validate(path, check_git=True, allow_pre_release=False):
         # A run recorded before its suite was renamed names the declaration by its historical
         # file name, which no longer exists: accepted only when the manifest's suite_id is itself a
         # historical id of this suite and the file named is exactly `<suites_dir>/<that id>.yaml`.
+        old_file = suite_file.parent / f"{manifest['suite_id']}.yaml"
         historical = (manifest["suite_id"] != suite["id"]
-                      and declared.resolve() == (suite_file.parent / f"{manifest['suite_id']}.yaml").resolve())
+                      and declared.resolve() == old_file.resolve()
+                      and not old_file.exists())     # a file still there is another declaration
         if declared.resolve() != suite_file.resolve() and not historical:
             errors.append(f"suite_file {declared} is not the declaration for {manifest['suite_id']!r} ({suite_file})")
         check_vendor(manifest, errors)

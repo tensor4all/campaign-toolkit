@@ -550,8 +550,8 @@ def recorded_declaration(d, manifest):
     history under one of the suite's names: the newest commit whose blob hashes to the recorded
     value is read. A run under a historical id whose exact blob was never committed is rendered
     against the newest version of the file under that id, which is what it was rendered against
-    before the rename. None when neither is reachable (a shallow clone); the caller then renders
-    against the current declaration, as before.
+    before the rename. None when neither is reachable (a shallow clone, no git);
+    `declaration_for` then refuses rather than render against the renamed file.
     """
     want = manifest.get('suite_sha256')
     if not want:

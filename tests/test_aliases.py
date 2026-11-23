@@ -282,6 +282,14 @@ class AliasedCampaignTest(unittest.TestCase):
         for manifest in sorted((self.root / "data/results").rglob("run.yaml")):
             self.assertEqual(validate_run.validate(str(manifest)), [], f"{manifest}")
 
+    def test_a_historical_suite_file_that_still_exists_is_another_declaration(self):
+        # Copy another suite over the historical file name: a manifest naming it is not the
+        # renamed suite's run any more, and is refused.
+        suites = self.root / "benchmarks/suites"
+        (suites / "fixture-kernels.yaml").write_text((suites / "fixture-external.yaml").read_text())
+        errors = validate_run.validate(str(self.root / RUN_A_REL / "run.yaml"))
+        self.assertTrue(any("is not the declaration" in e for e in errors), errors)
+
     def test_a_suite_file_naming_another_suite_is_still_refused(self):
         manifest = self.root / RUN_A_REL / "run.yaml"
         data = yaml.safe_load(manifest.read_text())

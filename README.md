@@ -286,7 +286,8 @@ is its `suite_sha256`, read back from git, or the newest file under its historic
 rendered with the `aliases.report` labels. So an old run's report still regenerates byte for
 byte and its numbers stay checked. A campaign without `aliases` renders against the current
 declaration, as before. Reading the recorded declaration back needs the repository's history (`fetch-depth: 0` in CI);
-without it, or without git, the current declaration is used. A `suite_sha256` entry is the
+without it, or without git, `report_run` and `check_generated` refuse such a run with that cause
+instead of rendering it against the renamed file. A `suite_sha256` entry is the
 campaign's assertion that only names changed; the toolkit does not compare the two grids.
 
 A rename rewrites the suite file, so without `suite_sha256` every run recorded under the old file
