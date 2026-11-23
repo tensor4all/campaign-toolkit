@@ -86,7 +86,8 @@ def power_state(root="/") -> dict:
 
 
 def numa_layout(root="/") -> dict | None:
-    """`host.numa`: the node count and each node's CPUs; None when the host exposes no nodes."""
+    """`host.numa`: the node count, each node's CPUs and the automatic NUMA balancing setting;
+    None when the host exposes no nodes."""
     base = pathlib.Path(root) / "sys/devices/system/node"
     try:
         nodes = sorted((int(p.name[4:]) for p in base.glob("node[0-9]*") if p.name[4:].isdigit()))
@@ -99,7 +100,11 @@ def numa_layout(root="/") -> dict | None:
         text = read(root, f"sys/devices/system/node/node{node}/cpulist")
         if text is not None:
             cpulists[str(node)] = text
-    return {"nodes": len(nodes), "cpulists": cpulists}
+    layout = {"nodes": len(nodes), "cpulists": cpulists}
+    balancing = read(root, "proc/sys/kernel/numa_balancing")
+    if balancing is not None:
+        layout["balancing"] = balancing
+    return layout
 
 
 def logical_cpu_ids(root="/") -> list[int]:

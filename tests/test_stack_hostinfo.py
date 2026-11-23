@@ -99,6 +99,12 @@ class HostinfoTest(unittest.TestCase):
         self.assertEqual(four["numa"]["nodes"], 4)
         self.assertEqual(four["numa"]["cpulists"]["3"], "48-63,112-127")
 
+    def test_numa_balancing_is_recorded_where_the_kernel_exposes_it(self):
+        fake_sysfs(self.tmp, **ZEN2_NPS4)
+        self.assertNotIn("balancing", hostinfo.collect(self.tmp)["numa"])
+        write(self.tmp, "proc/sys/kernel/numa_balancing", "1\n")
+        self.assertEqual(hostinfo.collect(self.tmp)["numa"]["balancing"], "1")
+
     def test_missing_files_are_null_not_errors(self):
         got = hostinfo.collect(self.tmp / "nothing")
         self.assertIsNone(got["power"])
@@ -167,7 +173,7 @@ class RunSchemaTest(unittest.TestCase):
         manifest["host"].setdefault("power", {})
         manifest["host"]["power"] = dict(manifest["host"]["power"] or {}, cpufreq_boost="0",
                                          smt={"active": "1", "control": "on"})
-        manifest["host"]["numa"] = {"nodes": 4, "cpulists": {"0": "0-15,64-79"}}
+        manifest["host"]["numa"] = {"nodes": 4, "cpulists": {"0": "0-15,64-79"}, "balancing": "1"}
         manifest["build"] = {"toolchain": {"rustc": "rustc 1.99.0\n", "rustc_release": "1.99.0",
                                            "rustflags": None, "target_cpu": None}}
         jsonschema_lite.validate(manifest, schema("benchmark-run.schema.json"))
@@ -537,6 +543,14 @@ class PinningTest(unittest.TestCase):
         for threads, (measured, gate, observer) in expect.items():
             got = self.resolved("zen2-cpu", threads)
             self.assertEqual((got["measured"], got["idle_gate"], got["observer"]), (measured, gate, observer))
+
+    def test_xeon9242_rows_stay_in_node_0_until_the_whole_node_is_measured(self):
+        expect = {1: ("0", "0", "24-95"), 4: ("0-3", "0-3", "24-95"),
+                  8: ("0-7", "0-7", "24-95"), 96: ("0-95", "0-95", "")}
+        for threads, (measured, gate, observer) in expect.items():
+            got = self.resolved("xeon9242-cpu", threads)
+            self.assertEqual((got["measured"], got["idle_gate"], got["observer"]), (measured, gate, observer))
+        self.assertEqual(descriptor.shared_profile("xeon9242-cpu")["numa"]["numa_balancing"], "1")
 
     def test_zen2_rows_equal_the_live_topology_derivation_on_128_cpus(self):
         tmp = pathlib.Path(tempfile.mkdtemp())

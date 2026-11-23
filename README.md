@@ -184,9 +184,12 @@ run manifest still records what the host actually reported, so a recorded run is
 unaffected by a later profile edit.
 
 A profile may also declare `smt` (how SMT siblings are numbered) and `thread_rows` (per
-thread count, the measured CPUs and the observer's CPUs). `zen5-cpu` and `zen2-cpu` (EPYC
-7702P, 64C/128T, measurement role) do. `campaign-validate-declarations` checks the rows
-(a measured core appears once; the observer shares no CPU with a measured core or its SMT
+thread count, the measured CPUs and the observer's CPUs). `zen5-cpu`, `zen2-cpu` (EPYC
+7702P, 64C/128T, measurement role) and `xeon9242-cpu` (Xeon Platinum 9242, 96C, 4 NUMA nodes,
+measurement role) do. A multi-node profile also states its NUMA conditions in `numa`: how a row
+is placed (`pin`), the memory-policy wrapper if any (`numactl`) and the automatic NUMA balancing
+setting (`numa_balancing`), which every run records beside the node layout
+(`host.numa.balancing`). `campaign-validate-declarations` checks the rows (a measured core appears once; the observer shares no CPU with a measured core or its SMT
 siblings), and the idle gate, `pinned.sh` and `record_run` (for a suite that does not name
 the profile in its `cpu_sets`, above) read them:
 
@@ -226,8 +229,8 @@ asks `gh` for the CI state of `main`, and fills a cell it cannot with a reason.
 
 `python -m campaign_toolkit.hostinfo --json` prints what decides whether two measurements are
 comparable: boost, governor, amd-pstate mode, platform profile, SMT, the NUMA layout (a Zen 2
-host's NPS setting), the SMT sibling map, the L3 domains, and the toolchain. A missing sysfs
-file is `null`. `record_run` writes `host.power.smt`, `host.numa` and `build.toolchain` from it
+host's NPS setting) and its automatic balancing setting, the SMT sibling map, the L3 domains,
+and the toolchain. A missing sysfs file is `null`. `record_run` writes `host.power.smt`, `host.numa` and `build.toolchain` from it
 into every new manifest; they are optional in the schema, so older manifests still validate.
 
 ## The result index, the history and the site
