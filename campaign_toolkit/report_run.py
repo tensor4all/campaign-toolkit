@@ -649,8 +649,8 @@ def declaration_for(manifest, exact=True):
     replaced, so it is rendered against that one (`recorded_declaration`). When that exact file
     cannot be read, `report_run --run-dir` (exact=True) refuses -- writing a report from any other
     file would print prose the run never recorded. `check_generated` (exact=False) compares instead
-    against the last file under the historical id, which writes nothing, and its finding names that
-    substitution if the two differ.
+    against the last file under the historical id, which writes nothing; a difference is then
+    reported as an ordinary "differs" finding.
     """
     d = descriptor.current()
     if manifest["suite_id"] == d.canonical_suite(manifest["suite_id"]):
