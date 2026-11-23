@@ -207,11 +207,13 @@ def comparison_verdict(best, within, key, row_names):
     the spread the run itself recorded. `within` holds each row's per-process relative SDs.
 
     The difference must also exceed the two rows' combined `±` in the cell's own unit (sqrt of
-    the two absolute sample SDs), which is the rule the page states: a cell whose `±` is as large
-    as the difference is not evidence. The relative band alone does not enforce it -- a row that
-    is noisy because some of its starts ran slow has a large median, which divides its own SD
-    down, so a 306 +/- 240 ms row against a 69 +/- 2 ms one cleared a 0.78 band with a log-ratio
-    of 1.49 while its `±` (240 ms) exceeded the 238 ms difference being claimed.
+    the two absolute sample SDs). The page tells its reader that a cell whose `±` is as large as
+    the difference is not evidence, and its legend says the column marks only differences larger
+    than the rows' combined spread; combining the two `±` is the conservative form of that sentence
+    (it is never narrower than the larger single `±`). The relative band cannot enforce it: it
+    compares a dimensionless spread with a log-ratio, so a ratio as large as 4.46x (|log| 1.49)
+    clears any band the noisy row's own CV (0.78) produces, while that row's `±` (239.7 ms) is
+    larger than the 237.6 ms difference being claimed (colmat-benchmark#121).
     """
     fork = best.get(key, {}).get(row_names[0])
     if not fork or len(fork) < 2:
