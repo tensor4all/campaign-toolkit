@@ -277,9 +277,8 @@
           "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
         },
         "report": {
-          "description": "`report` fields as they were before the rename; a run recorded under a historical suite or engine name prints these, so its report regenerates as written.",
-          "type": "object",
-          "additionalProperties": {"type": "string"}
+          "description": "`report` fields as they were before the rename (any `report` field: labels, verify_note, subject, row_labels, verdicts); a run recorded under a historical suite or engine name prints these, so its report regenerates as written.",
+          "type": "object"
         }
       }
     },

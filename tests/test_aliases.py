@@ -195,6 +195,21 @@ class AliasedCampaignTest(unittest.TestCase):
         cells = throughput.load_run(run, dtype="f64", order="c")
         self.assertEqual({key[4] for key in cells} & {"algo-lane", "algo-line"}, {"algo-line"})
 
+    def test_aliases_report_reaches_every_report_field(self):
+        # row_labels and subject are read in the tables; the alias must reach them too.
+        path = self.root / "benchmarks/campaign.yaml"
+        desc = yaml.safe_load(path.read_text())
+        desc["report"]["row_labels"] = {"algo-lane": "NEWLABEL", "algo-line": "NEWLABEL"}
+        desc["aliases"]["report"] = {"row_labels": {}}
+        path.write_text(yaml.safe_dump(desc, sort_keys=False))
+        descriptor.set_root(self.root)
+        run = (self.root / RUN_A_REL).resolve()
+        manifest = campaign.load(run / "run.yaml")
+        rows = report_run.read_rows([run / f for f in manifest["result_files"]])
+        text = report_run.render(manifest, report_run.declaration_for(manifest), rows, run)
+        self.assertNotIn("NEWLABEL", text)
+        self.assertEqual(text.encode(), self.report_before)
+
     def test_lookups_accept_either_name(self):
         d = descriptor.current()
         self.assertEqual(d.suite_path("fixture-kernels").name, "fixture-core.yaml")

@@ -224,14 +224,15 @@ def comparison_verdict(best, within, key, row_names):
     return out
 
 
-def row_label(engine):
+def row_label(engine, report=None):
     """The name a row is printed under: the descriptor's `report.row_labels`, or the row itself.
 
     The harness names a row after what it measures (a provider variant, an order), and a campaign
     whose table is a competition may want to print the library's name instead. The key stays the
     row's own name: only the label changes.
     """
-    return (descriptor.current().report.get('row_labels') or {}).get(engine, engine)
+    report = descriptor.current().report if report is None else report
+    return (report.get('row_labels') or {}).get(engine, engine)
 
 
 def verdict_text(verdict, fork_us, other, subject='fork'):
@@ -401,9 +402,9 @@ def render(manifest, suite, rows, run_dir):
             f"Each process retains {manifest['timing_policy']['repetitions']} chronological calls; "
             f"{manifest['run_spec']['aa']} complete process sets are recorded.",
             spread_guide_text(best, within),
-            *( [] if not descriptor.current().report.get('verdicts', True) else [
-                f"The `vs {row_label(row_names[0])}` column is the rotation-averaged ratio",
-                f"exp(mean over starts of log(engine median / {row_label(row_names[0])} median)),",
+            *( [] if not report.get('verdicts', True) else [
+                f"The `vs {row_label(row_names[0], report)}` column is the rotation-averaged ratio",
+                f"exp(mean over starts of log(engine median / {row_label(row_names[0], report)} median)),",
                 "with the per-start ratios beside it: `R > 1`",
                 'means the engine was slower than that first-declared row in that start. It removes a',
                 'row-position',
@@ -414,7 +415,7 @@ def render(manifest, suite, rows, run_dir):
             'per-start median range exceeds 5% of its median, and `p` a balanced cell whose estimated',
             'position-effect ratio exceeds 1.05. Flagged cells are retained, not discarded; the',
             'between-start variation can exceed the difference being compared.',
-            *( [] if not descriptor.current().report.get('verdicts', True) else [
+            *( [] if not report.get('verdicts', True) else [
                 'The `vs` columns mark only differences larger than the spread this run recorded for those',
                 'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
                 '`🔵 <row> X faster than <row>` / `🔴 <row> X slower than <row>` '
@@ -463,16 +464,16 @@ def render(manifest, suite, rows, run_dir):
                     # A campaign whose rows are two modes of one library carries no verdict: a
                     # ratio between two schedules of the same code is not a comparison between
                     # implementations, and a column of coloured ratios invites it to be read as one.
-                    verdicts_on = bool(descriptor.current().report.get("verdicts", True))
-                    out.append("| case | " + " | ".join(f"{row_label(e)} (ms)" for e in row_names) + " |"
+                    verdicts_on = bool(report.get("verdicts", True))
+                    out.append("| case | " + " | ".join(f"{row_label(e, report)} (ms)" for e in row_names) + " |"
                                + ("" if not v2 or not verdicts_on
-                                  else "".join(f" vs `{row_label(e)}` |" for e in row_names[1:]))
+                                  else "".join(f" vs `{row_label(e, report)}` |" for e in row_names[1:]))
                                + (" notes |" if v2 else " |"))
                     columns = (len(row_names) + (2 if not v2
                                                  else (2 + len(row_names) - 1 if verdicts_on else 1)))
                     out.append("|" + "---|" * columns)
-                    subject = (descriptor.current().report.get('subject')
-                               or row_label(row_names[0]))
+                    subject = (report.get('subject')
+                               or row_label(row_names[0], report))
                     for case in cases:
                         cells = []
                         key = (regime, case, dtype, *axis_values, threads)
@@ -491,7 +492,7 @@ def render(manifest, suite, rows, run_dir):
                                 verdicts = comparison_verdict(best, within, key, row_names)
                                 for engine in row_names[1:]:
                                     cells.append(verdict_text(
-                                        verdicts.get(engine), fork_us, row_label(engine), subject))
+                                        verdicts.get(engine), fork_us, row_label(engine, report), subject))
                             notes = []
                             if not balanced:
                                 notes.append('`*` one row has no measurement here')
@@ -561,8 +562,11 @@ def recorded_declaration(d, manifest):
     found = None
     names = d.suite_names(d.canonical_suite(manifest['suite_id']))
     paths = [(d.suites_dir / f'{name}.yaml').relative_to(d.root).as_posix() for name in names]
-    log = subprocess.run(['git', '-C', str(d.root), 'log', '--all', '--format=%H', '--', *paths],
-                         capture_output=True, text=True)
+    try:
+        log = subprocess.run(['git', '-C', str(d.root), 'log', '--all', '--format=%H', '--', *paths],
+                             capture_output=True, text=True)
+    except FileNotFoundError:   # no git: nothing to read back, render against the current file
+        return None
     for commit in log.stdout.split():
         for path in paths:
             blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:{path}'], capture_output=True)

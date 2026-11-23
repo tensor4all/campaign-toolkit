@@ -285,7 +285,9 @@ alike (`report_run.declaration_for`), against the declaration it recorded: the b
 is its `suite_sha256`, read back from git, or the newest file under its historical id. It is
 rendered with the `aliases.report` labels. So an old run's report still regenerates byte for
 byte and its numbers stay checked. A campaign without `aliases` renders against the current
-declaration, as before.
+declaration, as before. Reading the recorded declaration back needs the repository's history (`fetch-depth: 0` in CI);
+without it, or without git, the current declaration is used. A `suite_sha256` entry is the
+campaign's assertion that only names changed; the toolkit does not compare the two grids.
 
 A rename rewrites the suite file, so without `suite_sha256` every run recorded under the old file
 reads as measured under another declaration: the validator skips its declaration-derived checks and
