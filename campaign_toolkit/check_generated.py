@@ -102,7 +102,7 @@ def check_report(d, run_dir):
         manifest = load(run_dir / 'run.yaml')
         # The declaration the run was recorded under, when git still has it: a renamed or edited
         # declaration prints different prose, and a report is regenerated to check its numbers.
-        suite = report_run.declaration_for(manifest)
+        suite = report_run.declaration_for(manifest, exact=False)
         rows = report_run.read_rows([run_dir / f for f in manifest.get('result_files') or []])
         text = report_run.render(manifest, suite, rows, run_dir)
     except (SystemExit, Exception) as error:    # every failure is a finding here

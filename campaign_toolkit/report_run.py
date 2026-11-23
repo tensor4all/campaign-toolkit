@@ -584,17 +584,31 @@ def render(manifest, suite, rows, run_dir):
     return "\n".join(out).rstrip("\n") + "\n"
 
 
+def _git_lines(d, *args):
+    """stdout lines of a git command in the campaign root; [] without git."""
+    try:
+        return subprocess.run(['git', '-C', str(d.root), *args], capture_output=True, text=True).stdout.split()
+    except FileNotFoundError:
+        return []
+
+
+def _git_blob(d, commit, path):
+    try:
+        blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:{path}'], capture_output=True)
+    except FileNotFoundError:
+        return None
+    return blob.stdout if blob.returncode == 0 else None
+
+
 def recorded_declaration(d, manifest):
-    """The suite declaration a run was recorded under, read back from git, or None.
+    """The suite declaration a run was recorded under, read back from git by its hash, or None.
 
     A run records its declaration's `suite_sha256`. When the declaration has since moved -- an
-    edit, or a rename (`aliases.suites`), whose old file no longer exists -- the report printed the
-    old prose, so it can only regenerate from the old file. That file is in the repository's
-    history under one of the suite's names: the newest commit whose blob hashes to the recorded
-    value is read. A run under a historical id whose exact blob was never committed is rendered
-    against the newest version of the file under that id, which is what it was rendered against
-    before the rename. None when neither is reachable (a shallow clone, no git);
-    `declaration_for` then refuses rather than render against the renamed file.
+    edit, or a rename (`aliases.suites`), whose old file no longer exists -- its report printed the
+    old prose, so it can only regenerate from that exact file: the blob, under any of the suite's
+    names, whose sha256 is the recorded value. None when no such blob is reachable: the manifest
+    records no hash, the declaration it was recorded against was never committed, or there is no
+    history to read (a shallow clone, no git).
     """
     want = manifest.get('suite_sha256')
     if not want:
@@ -602,57 +616,61 @@ def recorded_declaration(d, manifest):
     current = d.suite_path(manifest['suite_id'])
     if current.exists() and hashlib.sha256(current.read_bytes()).hexdigest() == want:
         return load(current)
-    found = None
     names = d.suite_names(d.canonical_suite(manifest['suite_id']))
     paths = [(d.suites_dir / f'{name}.yaml').relative_to(d.root).as_posix() for name in names]
-    try:
-        log = subprocess.run(['git', '-C', str(d.root), 'log', '--all', '--format=%H', '--', *paths],
-                             capture_output=True, text=True)
-    except FileNotFoundError:   # no git: nothing to read back, render against the current file
-        return None
-    for commit in log.stdout.split():
+    for commit in _git_lines(d, 'log', '--all', '--format=%H', '--', *paths):
         for path in paths:
-            blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:{path}'], capture_output=True)
-            if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == want:
-                found = yaml.safe_load(blob.stdout)
-                break
-        if found is not None:
-            break
-    if found is None and manifest['suite_id'] != d.canonical_suite(manifest['suite_id']):
-        # Not recorded against a committed blob, but under a historical id: the newest version of
-        # the file under that id is what the campaign rendered it against before the rename.
-        own = (d.suites_dir / f"{manifest['suite_id']}.yaml").relative_to(d.root).as_posix()
-        for commit in subprocess.run(['git', '-C', str(d.root), 'log', '--all', '--format=%H', '--', own],
-                                     capture_output=True, text=True).stdout.split():
-            blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:{own}'], capture_output=True)
-            if blob.returncode == 0:
-                found = yaml.safe_load(blob.stdout)
-                break
-    return found
+            blob = _git_blob(d, commit, path)
+            if blob is not None and hashlib.sha256(blob).hexdigest() == want:
+                return yaml.safe_load(blob)
+    return None
 
 
-def declaration_for(manifest):
+def last_historical_declaration(d, manifest):
+    """The newest committed file under a run's historical suite id, or None.
+
+    Not the declaration the run recorded -- only the last one the campaign had under that name. It
+    is never used to write a report; `check_generated` compares against it when the exact one is not
+    reachable, and says so.
+    """
+    own = (d.suites_dir / f"{manifest['suite_id']}.yaml").relative_to(d.root).as_posix()
+    for commit in _git_lines(d, 'log', '--all', '--format=%H', '--', own):
+        blob = _git_blob(d, commit, own)
+        if blob is not None:
+            return yaml.safe_load(blob)
+    return None
+
+
+def declaration_for(manifest, exact=True):
     """The suite declaration a run's report is rendered against.
 
     The current declaration, except for a run recorded under a historical suite id (renamed,
     `aliases.suites`): its report printed the declaration it was recorded under, which the rename
-    replaced, so it is rendered against that one when git still has it (`recorded_declaration`).
-    `report_run --run-dir` and `check_generated` both call this, so they cannot disagree.
+    replaced, so it is rendered against that one (`recorded_declaration`). When that exact file
+    cannot be read, `report_run --run-dir` (exact=True) refuses -- writing a report from any other
+    file would print prose the run never recorded. `check_generated` (exact=False) compares instead
+    against the last file under the historical id, which writes nothing, and its finding names that
+    substitution if the two differ.
     """
     d = descriptor.current()
-    if manifest["suite_id"] != d.canonical_suite(manifest["suite_id"]):
-        found = recorded_declaration(d, manifest)
-        if found is None:
-            # Rendering against the renamed file would print prose the run never recorded, and a
-            # "differs" finding (or a rewritten report) would follow from a missing history, not
-            # from the data. Refuse, and say what is missing.
-            raise SystemExit(
-                f"cannot read the declaration run under suite {manifest['suite_id']!r} recorded "
-                f"(suite_sha256 {manifest.get('suite_sha256')}): it was renamed to "
-                f"{d.canonical_suite(manifest['suite_id'])!r} and its old file is only in git history; "
-                f"a shallow clone or a checkout without git cannot read it (CI: fetch-depth: 0)")
+    if manifest["suite_id"] == d.canonical_suite(manifest["suite_id"]):
+        return load(d.suite_path(manifest["suite_id"]))
+    found = recorded_declaration(d, manifest)
+    if found is not None:
         return found
-    return load(d.suite_path(manifest["suite_id"]))
+    if not exact:
+        fallback = last_historical_declaration(d, manifest)
+        if fallback is not None:
+            return fallback
+    if not manifest.get("suite_sha256"):
+        why = "the manifest records no suite_sha256, so the exact file cannot be identified"
+    else:
+        why = ("no reachable commit holds a file with its recorded suite_sha256 "
+               f"{manifest['suite_sha256']} (never committed, or a shallow clone / no git: "
+               "CI needs fetch-depth: 0)")
+    raise SystemExit(
+        f"cannot read the declaration run under suite {manifest['suite_id']!r} recorded: it was renamed "
+        f"to {d.canonical_suite(manifest['suite_id'])!r}, and {why}")
 
 
 def main(argv=None, root=None):

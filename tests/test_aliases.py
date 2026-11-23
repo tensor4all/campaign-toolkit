@@ -134,8 +134,7 @@ class AliasedCampaignTest(unittest.TestCase):
         pages, _missing = site.current_pages(site_root, [])
         self.assertEqual(len([p for p in pages if p.parent.parent.name == "fixture-cpu"]), 1)
 
-    def test_an_old_run_regenerates_from_the_declaration_it_recorded(self):
-        from campaign_toolkit import check_generated
+    def commit_rename(self):
         # The campaign as a repository: the pre-rename declaration is committed, then renamed and its
         # prose edited (as colmat-benchmark#113 did). The old run's report printed the old prose, so
         # it regenerates only from the old file, which check_generated reads back from git.
@@ -164,6 +163,10 @@ class AliasedCampaignTest(unittest.TestCase):
         test_toolkit.git(self.root, "commit", "-qm", "rename")
         descriptor.set_root(self.root)
 
+
+    def test_an_old_run_regenerates_from_the_declaration_it_recorded(self):
+        from campaign_toolkit import check_generated
+        self.commit_rename()
         def run():
             with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
                 code = check_generated.main(["--all", "--no-index"], root=self.root)
@@ -194,6 +197,33 @@ class AliasedCampaignTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             report_run.main(["--run-dir", str(self.root / RUN_A_REL)], root=self.root)
         self.assertEqual((self.root / RUN_A_REL / "report.md").read_bytes(), before)
+
+    def test_an_uncommitted_recorded_declaration_is_never_written_from_a_guess(self):
+        from campaign_toolkit import check_generated
+        self.commit_rename()
+        manifest = self.root / RUN_A_REL / "run.yaml"
+        data = yaml.safe_load(manifest.read_text())
+        data["suite_sha256"] = "0" * 64              # recorded against a file never committed
+        manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+        before = (self.root / RUN_A_REL / "report.md").read_bytes()
+        with self.assertRaises(SystemExit) as refused:
+            report_run.main(["--run-dir", str(self.root / RUN_A_REL)], root=self.root)
+        self.assertIn("no reachable commit holds", str(refused.exception))
+        self.assertEqual((self.root / RUN_A_REL / "report.md").read_bytes(), before)
+        # the check compares against the last historical file instead (writing nothing)
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+            code = check_generated.main(["--run", str(self.root / RUN_A_REL), "--no-index"], root=self.root)
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual((self.root / RUN_A_REL / "report.md").read_bytes(), before)
+
+    def test_a_manifest_without_suite_sha256_is_refused_with_that_cause(self):
+        self.commit_rename()
+        manifest = self.root / RUN_A_REL / "run.yaml"
+        data = yaml.safe_load(manifest.read_text())
+        del data["suite_sha256"]
+        with self.assertRaises(SystemExit) as refused:
+            report_run.declaration_for(data)
+        self.assertIn("records no suite_sha256", str(refused.exception))
 
     def test_chart_cells_from_old_rows_are_keyed_by_the_current_engine(self):
         import test_candidate

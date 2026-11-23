@@ -282,7 +282,9 @@ aliases:
 
 A run recorded under a historical suite id is rendered, by `report_run` and by `check_generated`
 alike (`report_run.declaration_for`), against the declaration it recorded: the blob whose sha256
-is its `suite_sha256`, read back from git, or the newest file under its historical id. It is
+is its `suite_sha256`, read back from git. If that exact file is unreachable, `report_run`
+refuses to write, and `check_generated` compares against the newest file under the historical id
+(it writes nothing). It is
 rendered with the `aliases.report` labels. So an old run's report still regenerates byte for
 byte and its numbers stay checked. A campaign without `aliases` renders against the current
 declaration, as before. Reading the recorded declaration back needs the repository's history (`fetch-depth: 0` in CI);
@@ -300,8 +302,7 @@ The readers that look a name up (`find_suite`, `suite_path`, `provider_of`, the 
 `suite_file` check, the report's engine documentation) accept either name, and the readers that
 aggregate (`gen_index`, the site, the charts, the trend, `cell_of` and the comparisons) print the
 current one, so an old run and a new run of one suite land in the same cell. A regenerated old
-report still prints the names its rows carry; it is byte-identical only when the rename changed
-nothing but names, because the report also prints the current declaration's prose. The recorder records
+report still prints the names its rows carry. The recorder records
 under the current names, whichever one it is given. The site's HTML copy of a record kept under a
 historical suite directory opens with a one-line key from the old names to the current ones.
 `declarations` refuses an alias that points at nothing, or one whose old name is still current.
