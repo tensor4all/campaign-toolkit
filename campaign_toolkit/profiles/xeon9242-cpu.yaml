@@ -1,0 +1,40 @@
+# A hardware profile: a machine (or a well-defined container on one) whose cells
+# are only comparable with each other. See zen5-cpu.yaml for what a profile is.
+# The x86_64 host of the cpueinsum route-fit campaign (cpueinsum-benchmark#18): a compute node of
+# a PBS cluster, measured in an exclusive job (`place=excl`), so the whole node is the profile.
+role: measurement
+name: xeon9242-cpu
+description: >-
+  Intel Xeon Platinum 9242, 2 packages of 2 dies of 24 cores, 96 cores, no SMT, Linux.
+  Each die is one NUMA node with its own 35.75 MiB L3, so the host has 4 NUMA nodes and
+  4 L3 domains, and they coincide: CPUs 0-23, 24-47, 48-71 and 72-95. The kernel reports
+  distance 10 local and 21 remote for every pair of nodes, the second package included.
+  A row is placed by CPU affinity only (`pinned.sh`, `taskset -c` on the row's CPUs); no
+  `numactl` memory policy wraps the process, so memory is placed by first touch, which in
+  a harness that fills its buffers on the main thread is node 0. Automatic NUMA balancing
+  is on (`numa_balancing=1`) and is an administrator setting the measurement cannot change:
+  it may migrate pages during a run, which shows as bimodal timings on rows that span
+  several nodes (the 96T row spans all four). Every run records the node layout and the
+  balancing setting it found (`host.numa`); a run under a different setting is not
+  comparable with one under this one. Power: governor `performance`; turbo is recorded
+  (`intel_no_turbo`), not switched.
+cpu: Intel Xeon Platinum 9242
+logical_cpus: 96
+l3: "35.75 MiB (36608K) shared per die = per NUMA node: 0-23, 24-47, 48-71, 72-95"
+smt: {threads_per_core: 1, sibling_offset: 96}
+record_numa: true
+numa:
+  pin: "CPU affinity only: pinned.sh runs the process under taskset -c <the row's measured CPUs>"
+  numactl: "none: no memory policy wrapper; pages are placed by first touch"
+  numa_balancing: "1"
+power:
+  governor: performance
+# One CPU per core is measured (there is no SMT). The 1T, 4T and 8T rows sit in node 0 and its
+# L3 domain, and the observer takes the three other nodes, which share no L3 with the measured
+# cores. At 96T every core is measured and the observer is empty, as zen2-cpu's 64T row: the
+# driving agent must stay off the node (on the cluster's login node) for the whole run.
+thread_rows:
+  - {threads: 1, measured: "0", observer: "24-95"}
+  - {threads: 4, measured: "0-3", observer: "24-95"}
+  - {threads: 8, measured: "0-7", observer: "24-95"}
+  - {threads: 96, measured: "0-95", observer: ""}

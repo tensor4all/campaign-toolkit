@@ -421,6 +421,10 @@
             "nodes"
           ],
           "properties": {
+            "balancing": {
+              "type": "string",
+              "description": "`/proc/sys/kernel/numa_balancing` as read (`0` off, `1` on); absent where the kernel does not expose it."
+            },
             "nodes": {
               "type": "integer",
               "minimum": 1

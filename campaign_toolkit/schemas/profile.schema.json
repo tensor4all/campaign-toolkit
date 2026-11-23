@@ -53,6 +53,26 @@
       "type": "boolean",
       "description": "True when the NUMA layout is not known in advance and every run must record it (host.numa)."
     },
+    "numa": {
+      "type": "object",
+      "description": "How a multi-node host is measured with respect to NUMA, stated so a page can say it: how a row is placed, what memory policy wrapper (if any) runs the process, and the automatic NUMA balancing setting, as the raw string host.numa.balancing records.",
+      "required": [
+        "pin",
+        "numactl",
+        "numa_balancing"
+      ],
+      "properties": {
+        "pin": {
+          "type": "string"
+        },
+        "numactl": {
+          "type": "string"
+        },
+        "numa_balancing": {
+          "type": "string"
+        }
+      }
+    },
     "power": {
       "type": "object",
       "description": "The power state wanted while measuring, as the raw strings host.power records.",
