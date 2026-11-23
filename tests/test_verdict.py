@@ -32,12 +32,20 @@ class Verdict(unittest.TestCase):
         self.assertLess(ratio, 1)          # faer faster: 104.28 vs 168.06 +/- 14.02
 
     def test_a_difference_equal_to_the_spread_is_not_a_verdict(self):
-        # The other row's SD is exactly 100 and so is the difference: "as large as" is not
+        # The other row's `±` is exactly 100 and so is the difference: "as large as" is not
         # "larger than". |log 101| = 4.6 clears the relative band (0.99), so only the absolute
         # rule decides; shifting the row by 0.5 keeps its SD and makes the difference 100.5.
         self.assertIs(verdict([1.0, 1.0, 1.0], [1.0, 101.0, 201.0]), False)
         ratio, _ = verdict([1.0, 1.0, 1.0], [1.5, 101.5, 201.5])
         self.assertLess(ratio, 1)
+
+    def test_a_difference_beyond_each_printed_spread_is_reported(self):
+        # colmat-benchmark zen5 candidate-tall-guard-mkl qr/4096x256 4T: 33.4992 +/- 2.79222 vs
+        # 30.1599 +/- 1.90694. The 3.339 ms difference beats both printed `±`, so the page's own
+        # sentence calls it evidence (their hypot, 3.381, would not have).
+        f, o = 33.4992, 30.1599
+        ratio, _ = verdict([f - 2.79222, f, f + 2.79222], [o - 1.90694, o, o + 1.90694])
+        self.assertGreater(ratio, 1)
 
     def test_the_relative_floor_still_applies(self):
         # Tight rows 3% apart: beyond the absolute spread, inside the 5% floor.

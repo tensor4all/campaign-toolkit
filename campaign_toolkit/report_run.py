@@ -206,14 +206,13 @@ def comparison_verdict(best, within, key, row_names):
     sample SDs) floored at 5%, so a cell is only annotated when the difference is larger than
     the spread the run itself recorded. `within` holds each row's per-process relative SDs.
 
-    The difference must also exceed the two rows' combined `±` in the cell's own unit (sqrt of
-    the two absolute sample SDs). The page tells its reader that a cell whose `±` is as large as
-    the difference is not evidence, and its legend says the column marks only differences larger
-    than the rows' combined spread; combining the two `±` is the conservative form of that sentence
-    (it is never narrower than the larger single `±`). The relative band cannot enforce it: it
-    compares a dimensionless spread with a log-ratio, so a ratio as large as 4.46x (|log| 1.49)
-    clears any band the noisy row's own CV (0.78) produces, while that row's `±` (239.7 ms) is
-    larger than the 237.6 ms difference being claimed (colmat-benchmark#121).
+    The difference must also exceed each row's printed `±` (its absolute sample SD, in the
+    cell's own unit). That is the sentence the page's spread guide prints: a cell whose `±` is as
+    large as the difference is not evidence. It is checked against the larger of the two printed
+    values, so a reader can verify every `·` it produces from the cell alone. The relative band
+    cannot enforce it: it compares a dimensionless spread with a log-ratio, so a ratio as large as
+    4.46x (|log| 1.49) clears any band the noisy row's own CV (0.78) produces, while that row's
+    `±` (239.7 ms) is larger than the 237.6 ms difference being claimed (colmat-benchmark#121).
     """
     fork = best.get(key, {}).get(row_names[0])
     if not fork or len(fork) < 2:
@@ -231,7 +230,7 @@ def comparison_verdict(best, within, key, row_names):
         band = max(math.hypot(statistics.stdev(fork) / fork_median,
                               statistics.stdev(other) / other_median), VERDICT_FLOOR)
         ratio = fork_median / other_median
-        spread = math.hypot(statistics.stdev(fork), statistics.stdev(other))
+        spread = max(statistics.stdev(fork), statistics.stdev(other))
         out[engine] = ((ratio, band) if abs(math.log(ratio)) > band
                        and abs(other_median - fork_median) > spread else False)
     return out
