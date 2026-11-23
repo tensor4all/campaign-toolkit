@@ -286,6 +286,16 @@ class Descriptor:
         return list(self.data.get("loader_paths", []))
 
     @property
+    def recorded_env(self) -> list:
+        """`measured.recorded_env`: harness variables the manifest records (`harness_env`)."""
+        return list(self.measured.get("recorded_env", []))
+
+    @property
+    def timing_baseline(self) -> dict:
+        """`timing.baseline`: the frozen priming/repetitions a comparable run meets ({} if none)."""
+        return dict((self.data.get("timing") or {}).get("baseline") or {})
+
+    @property
     def csv_columns(self) -> list:
         return list(self.data.get("csv_columns", []))
 
