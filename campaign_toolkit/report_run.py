@@ -205,6 +205,14 @@ def comparison_verdict(best, within, key, row_names):
     The band is the combined between-start spread of the two rows (sqrt of the two relative
     sample SDs) floored at 5%, so a cell is only annotated when the difference is larger than
     the spread the run itself recorded. `within` holds each row's per-process relative SDs.
+
+    The difference must also exceed each row's printed `±` (its absolute sample SD, in the
+    cell's own unit). That is the sentence the page's spread guide prints: a cell whose `±` is as
+    large as the difference is not evidence. It is checked against the larger of the two printed
+    values, so a reader can verify every `·` it produces from the cell alone. The relative band
+    cannot enforce it: it compares a dimensionless spread with a log-ratio. In
+    colmat-benchmark#121 a 4.46x ratio (|log| 1.49) cleared the 0.78 band that the noisy row's CV
+    produced, while that row's `±` (239.7 ms) was larger than the 237.6 ms difference claimed.
     """
     fork = best.get(key, {}).get(row_names[0])
     if not fork or len(fork) < 2:
@@ -222,7 +230,9 @@ def comparison_verdict(best, within, key, row_names):
         band = max(math.hypot(statistics.stdev(fork) / fork_median,
                               statistics.stdev(other) / other_median), VERDICT_FLOOR)
         ratio = fork_median / other_median
-        out[engine] = (ratio, band) if abs(math.log(ratio)) > band else False
+        spread = max(statistics.stdev(fork), statistics.stdev(other))
+        out[engine] = ((ratio, band) if abs(math.log(ratio)) > band
+                       and abs(other_median - fork_median) > spread else False)
     return out
 
 
@@ -460,10 +470,11 @@ def render(manifest, suite, rows, run_dir):
             'between-start variation can exceed the difference being compared.',
             *( [] if not report.get('verdicts', True) else [
                 'The `vs` columns mark only differences larger than the spread this run recorded for those',
-                'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
+                'two rows (combined between-start SD, floored at 5%) and larger than each of the two rows\' `±`,',
+                'always with the measured library as the subject:',
                 '`🔵 <row> X faster than <row>` / `🔴 <row> X slower than <row>` '
                 '(the subject is the first column of the table, the compared row is named in',
-                'the cell, not only in the column header), `·` inside the band, `-` that row is not',
+                'the cell, not only in the column header), `·` inside the band or within a row\'s `±`, `-` that row is not',
                 'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
             ]),
 
