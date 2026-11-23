@@ -205,6 +205,13 @@ def comparison_verdict(best, within, key, row_names):
     The band is the combined between-start spread of the two rows (sqrt of the two relative
     sample SDs) floored at 5%, so a cell is only annotated when the difference is larger than
     the spread the run itself recorded. `within` holds each row's per-process relative SDs.
+
+    The difference must also exceed the two rows' combined `±` in the cell's own unit (sqrt of
+    the two absolute sample SDs), which is the rule the page states: a cell whose `±` is as large
+    as the difference is not evidence. The relative band alone does not enforce it -- a row that
+    is noisy because some of its starts ran slow has a large median, which divides its own SD
+    down, so a 306 +/- 240 ms row against a 69 +/- 2 ms one cleared a 0.78 band with a log-ratio
+    of 1.49 while its `±` (240 ms) exceeded the 238 ms difference being claimed.
     """
     fork = best.get(key, {}).get(row_names[0])
     if not fork or len(fork) < 2:
@@ -222,7 +229,9 @@ def comparison_verdict(best, within, key, row_names):
         band = max(math.hypot(statistics.stdev(fork) / fork_median,
                               statistics.stdev(other) / other_median), VERDICT_FLOOR)
         ratio = fork_median / other_median
-        out[engine] = (ratio, band) if abs(math.log(ratio)) > band else False
+        spread = math.hypot(statistics.stdev(fork), statistics.stdev(other))
+        out[engine] = ((ratio, band) if abs(math.log(ratio)) > band
+                       and abs(other_median - fork_median) > spread else False)
     return out
 
 
