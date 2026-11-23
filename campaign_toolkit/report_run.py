@@ -210,9 +210,9 @@ def comparison_verdict(best, within, key, row_names):
     cell's own unit). That is the sentence the page's spread guide prints: a cell whose `±` is as
     large as the difference is not evidence. It is checked against the larger of the two printed
     values, so a reader can verify every `·` it produces from the cell alone. The relative band
-    cannot enforce it: it compares a dimensionless spread with a log-ratio, so a ratio as large as
-    4.46x (|log| 1.49) clears any band the noisy row's own CV (0.78) produces, while that row's
-    `±` (239.7 ms) is larger than the 237.6 ms difference being claimed (colmat-benchmark#121).
+    cannot enforce it: it compares a dimensionless spread with a log-ratio. In
+    colmat-benchmark#121 a 4.46x ratio (|log| 1.49) cleared the 0.78 band that the noisy row's CV
+    produced, while that row's `±` (239.7 ms) was larger than the 237.6 ms difference claimed.
     """
     fork = best.get(key, {}).get(row_names[0])
     if not fork or len(fork) < 2:
@@ -470,10 +470,11 @@ def render(manifest, suite, rows, run_dir):
             'between-start variation can exceed the difference being compared.',
             *( [] if not report.get('verdicts', True) else [
                 'The `vs` columns mark only differences larger than the spread this run recorded for those',
-                'two rows (combined between-start SD, floored at 5%), always with the measured library as the subject:',
+                'two rows (combined between-start SD, floored at 5%) and larger than each of the two rows\' `±`,',
+                'always with the measured library as the subject:',
                 '`🔵 <row> X faster than <row>` / `🔴 <row> X slower than <row>` '
                 '(the subject is the first column of the table, the compared row is named in',
-                'the cell, not only in the column header), `·` inside the band, `-` that row is not',
+                'the cell, not only in the column header), `·` inside the band or within a row\'s `±`, `-` that row is not',
                 'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
             ]),
 
