@@ -754,6 +754,16 @@
         }
       }
     },
+    "harness_env": {
+      "description": "The descriptor's `measured.recorded_env` variables as the recorder passed them to the harness (null: unset). Absent from manifests recorded before the field existed and from campaigns that declare none.",
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
     "suite_sha256": {
       "type": [
         "string",

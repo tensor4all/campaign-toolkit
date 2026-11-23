@@ -1242,6 +1242,9 @@ def main(argv=None, root=None):
         **({"upstream": upstream_block} if upstream_block else {}),
         **({"vendor": vendor_record} if vendor_record else {}),
         "harness": harness,
+        # What the harness read from the environment that decides what it measures (a layout
+        # filter, say): without it a manifest describes a grid its command alone cannot reproduce.
+        **({"harness_env": {name: env.get(name) for name in d.recorded_env}} if d.recorded_env else {}),
         **({"local_commits_allowed": True} if args.allow_local_commits else {}),
         **({"pre_release": True} if args.pre_release else {}),
         **({'toolkit': toolkit, 'verification_files': verification_files,

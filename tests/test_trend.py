@@ -218,6 +218,24 @@ class TrendLinesTest(unittest.TestCase):
         self.assertIn('timing v1', table)
         self.assertIn('timing v2', table)
 
+    def test_a_run_below_the_timing_baseline_is_its_own_line(self):
+        from unittest import mock
+        baseline = {'prime_ms': 250, 'reps': 5}
+        at = {'timing_policy': {'version': 2, 'minimum_untimed_priming_ms': 250, 'repetitions': 5}}
+        below = {'timing_policy': {'version': 2, 'minimum_untimed_priming_ms': 100, 'repetitions': 3}}
+        fake = mock.Mock(timing_baseline=baseline, get=lambda k, default=None: {'version': 2})
+        with mock.patch('campaign_toolkit.campaign.descriptor.current', return_value=fake):
+            self.assertEqual(trend.timing_policy_of(at), 'v2')
+            marked = trend.timing_policy_of(below)
+        self.assertEqual(marked, 'v2 below baseline (priming 100 ms < 250 ms; 3 reps < 5)')
+        points = [point('a' * 40, '2026-10-01T00:00:00Z', timing_policy='v2'),
+                  point('b' * 40, '2026-10-08T00:00:00Z', timing_policy='v2'),
+                  point('b' * 40, '2026-10-09T00:00:00Z', timing_policy=marked),
+                  point('c' * 40, '2026-10-15T00:00:00Z', timing_policy=marked)]
+        svg, table, _ = trend.render(ENTRY, points)
+        self.assertEqual(len(polylines(svg)), 2)
+        self.assertIn('below baseline', table)
+
     def test_power_states_and_vendor_arms_are_separate_lines(self):
         points = [point('a' * 40, '2026-10-01T00:00:00Z', power='unrecorded'),
                   point('b' * 40, '2026-10-08T00:00:00Z'),

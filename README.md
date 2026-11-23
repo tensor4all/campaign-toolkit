@@ -393,6 +393,14 @@ in v2, including when omitted from a campaign's display axes. They show medians
 with separate within-process and scheduled between-process sample SD, not
 best-of-repeats or confidence intervals.
 `{timing}` in `page_name` keeps revised-contract pages separate from historical v1.
+`timing.baseline: {prime_ms, reps, min_verdict_ratio, reference}` names the settings the
+campaign froze for its version. A run of that version recorded with less priming or fewer
+reps still publishes, but its page header says it is not comparable with the campaign's
+other pages, its index row's `status` is marked, and a verdict on it also needs a ratio beyond
+`min_verdict_ratio` (too little priming is a bias of a few percent).
+`measured.recorded_env` lists environment variables the harness reads that change what it
+measures (a layout filter, say); the recorder writes their values into the manifest's
+`harness_env` and the page prints them, so the command plus that line reproduce the grid.
 For v2 recording, install the toolkit **editable from its own Git checkout**
 (e.g. `pip install -e ../campaign-toolkit`). A wheel or ordinary non-editable VCS
 installation does not retain the required source identity; an enclosing campaign
