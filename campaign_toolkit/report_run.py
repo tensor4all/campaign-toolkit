@@ -594,7 +594,7 @@ def _git_lines(d, *args):
 
 def _git_blob(d, commit, path):
     try:
-        blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:{path}'], capture_output=True)
+        blob = subprocess.run(['git', '-C', str(d.root), 'show', f'{commit}:./{path}'], capture_output=True)
     except FileNotFoundError:
         return None
     return blob.stdout if blob.returncode == 0 else None

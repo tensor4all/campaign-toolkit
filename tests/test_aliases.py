@@ -134,7 +134,7 @@ class AliasedCampaignTest(unittest.TestCase):
         pages, _missing = site.current_pages(site_root, [])
         self.assertEqual(len([p for p in pages if p.parent.parent.name == "fixture-cpu"]), 1)
 
-    def commit_rename(self):
+    def commit_rename(self, repo=None):
         # The campaign as a repository: the pre-rename declaration is committed, then renamed and its
         # prose edited (as colmat-benchmark#113 did). The old run's report printed the old prose, so
         # it regenerates only from the old file, which check_generated reads back from git.
@@ -145,9 +145,9 @@ class AliasedCampaignTest(unittest.TestCase):
         desc = self.root / "benchmarks/campaign.yaml"
         renamed_desc = desc.read_text()
         desc.write_text(self.old_descriptor)
-        test_toolkit.git(self.root, "init", "-q")
-        test_toolkit.git(self.root, "add", "-A")
-        test_toolkit.git(self.root, "commit", "-qm", "before the rename")
+        test_toolkit.git(repo or self.root, "init", "-q")
+        test_toolkit.git(repo or self.root, "add", "-A")
+        test_toolkit.git(repo or self.root, "commit", "-qm", "before the rename")
         (self.root / "benchmarks/suites/fixture-kernels.yaml").unlink()
         suite.write_text(renamed.replace("The overhead baseline.", "The overhead baseline (renamed)."))
         # the rename also rewords a report label; old runs print the old one (aliases.report)
@@ -159,8 +159,8 @@ class AliasedCampaignTest(unittest.TestCase):
         data["aliases"]["report"] = {"provider_label": old_label}
         data["aliases"]["report"]["verify_note"] = old_note or descriptor.DEFAULT_VERIFY_NOTE
         desc.write_text(yaml.safe_dump(data, sort_keys=False))
-        test_toolkit.git(self.root, "add", "-A")
-        test_toolkit.git(self.root, "commit", "-qm", "rename")
+        test_toolkit.git(repo or self.root, "add", "-A")
+        test_toolkit.git(repo or self.root, "commit", "-qm", "rename")
         descriptor.set_root(self.root)
 
 
@@ -197,6 +197,15 @@ class AliasedCampaignTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             report_run.main(["--run-dir", str(self.root / RUN_A_REL)], root=self.root)
         self.assertEqual((self.root / RUN_A_REL / "report.md").read_bytes(), before)
+
+    def test_a_campaign_below_its_repository_root_reads_the_old_declaration(self):
+        # The repository is the campaign's parent directory: git paths are cwd-relative there.
+        self.commit_rename(repo=self.root.parent)
+        run = self.root / RUN_A_REL
+        before = (run / "report.md").read_bytes()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(report_run.main(["--run-dir", str(run)], root=self.root), 0)
+        self.assertEqual((run / "report.md").read_bytes(), before)
 
     def test_an_uncommitted_recorded_declaration_is_never_written_from_a_guess(self):
         from campaign_toolkit import check_generated
