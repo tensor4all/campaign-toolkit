@@ -47,6 +47,11 @@ class Verdict(unittest.TestCase):
         ratio, _ = verdict([f - 2.79222, f, f + 2.79222], [o - 1.90694, o, o + 1.90694])
         self.assertGreater(ratio, 1)
 
+    def test_a_noisy_fork_row_is_checked_too(self):
+        # The fork's own `±` counts: zen5 325e482 OpenBLAS gemm/64x64x64 8T printed "89x slower"
+        # for a fork row of 1.504 +/- 2.444 ms. Mirror of the boundary case above, fork side.
+        self.assertIs(verdict([1.0, 101.0, 201.0], [1.0, 1.0, 1.0]), False)
+
     def test_the_relative_floor_still_applies(self):
         # Tight rows 3% apart: beyond the absolute spread, inside the 5% floor.
         self.assertIs(verdict([100.0, 100.01], [103.0, 103.01]), False)
