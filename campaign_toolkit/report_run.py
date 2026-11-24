@@ -21,7 +21,7 @@ import sys
 import yaml
 
 from . import descriptor
-from .campaign import case_dims, load, provider_of, same_name
+from .campaign import below_timing_baseline, case_dims, load, provider_of, same_name
 
 
 def columns():
@@ -202,7 +202,7 @@ DISPATCH_US = 0.02          # below ~20 us/call the multi-thread rows pay thread
 MARGINAL = 0.6  # a verdict whose largest spread is at least this share of its difference is marginal
 
 
-def comparison_verdict(best, within, key, row_names):
+def comparison_verdict(best, within, key, row_names, min_ratio=1.0):
     """One verdict per other engine: `(ratio, band, marginal)` when the difference beats the spread.
 
     The band is the combined between-start spread of the two rows (sqrt of the two relative
@@ -210,16 +210,19 @@ def comparison_verdict(best, within, key, row_names):
     the spread the run itself recorded. `within` holds each row's per-process sample SDs, in the
     cell's own unit (the page prints their median as `W`).
 
-    Three further rules hold the verdict to the sentence the page's spread guide prints, "a cell
-    whose `±` is as large as the difference is not evidence", in the cell's own unit, so a reader
-    can check every one of them from the cell alone:
+    The relative band cannot hold a cell to the sentence the page's spread guide prints, "a cell
+    whose `±` is as large as the difference is not evidence": it compares a dimensionless spread
+    with a log-ratio. In colmat-benchmark#121 a 4.46x ratio (|log| 1.49) cleared the 0.78 band
+    that the noisy row's CV produced, while that row's `±` (239.7 ms) was larger than the
+    237.6 ms difference claimed. Three further rules enforce the sentence in the cell's own unit,
+    so a reader can check every one of them from the cell alone:
 
     - the difference must exceed the *sum* of the two printed `±`: a median ± SD interval that
-      overlaps the other row's is not a difference. colmat-benchmark#102 ohtaka small cholesky
-      2048 64T printed "1.14x faster" for 21.19 ± 2.57 against 24.20 ± 0.45: the 3.01 ms
-      difference beat the larger `±` (the rule before this one) but not their sum (3.02), and
-      with two process sets the fork's between-start range was 3.63 ms. The sum replaces the
-      larger of the two (colmat-benchmark#102 review).
+      overlaps the other row's is not a difference. The sum is at least the larger of the two, so
+      the earlier "beyond each printed `±`" rule still holds. colmat-benchmark#102 ohtaka small
+      cholesky 2048 64T printed "1.14x faster" for 21.19 ± 2.57 against 24.20 ± 0.45: the 3.01 ms
+      difference beat the larger `±` but not their sum (3.02), and with two process sets the
+      fork's between-start range was 3.63 ms (colmat-benchmark#102 review).
     - the difference must exceed each row's `W`. A row whose calls inside one process disagree
       by more than the difference is bimodal or contended, and its process median hides that: the
       same run's OpenBLAS lu 2048 128T was 783.7 ± 72.4 (W 1071.7) against a 720.9 ms difference.
@@ -227,6 +230,10 @@ def comparison_verdict(best, within, key, row_names):
       and the honest fix is a rerun, not a number.
     - a verdict that clears every rule but whose largest spread (the `±` sum or either `W`) is at
       least `MARGINAL` of the difference carries that share, and the page calls it marginal.
+
+    `min_ratio` is the campaign's `timing.baseline.min_verdict_ratio` for a run recorded below the
+    baseline (`below_timing_baseline`): such a run carries a known bias of a few percent, so a
+    ratio inside it is not called either way (`False`, before the `W` rule is consulted).
     """
     fork = best.get(key, {}).get(row_names[0])
     if not fork or len(fork) < 2:
@@ -246,7 +253,8 @@ def comparison_verdict(best, within, key, row_names):
         ratio = fork_median / other_median
         difference = abs(other_median - fork_median)
         spread = statistics.stdev(fork) + statistics.stdev(other)
-        if abs(math.log(ratio)) <= band or difference <= spread:
+        if (abs(math.log(ratio)) <= band or difference <= spread
+                or max(ratio, 1 / ratio) <= min_ratio):
             out[engine] = False
             continue
         rows_w = [statistics.median(sds) for sds in
@@ -309,8 +317,34 @@ def spread_guide_text(best, within):
     )
 
 
+def baseline_line(manifest, below, baseline):
+    """The header line of a run below the campaign's timing baseline, or `[]`."""
+    if not below:
+        return []
+    version = manifest['timing_policy']['version']
+    ratio = baseline.get('min_verdict_ratio')
+    reference = f", {baseline['reference']}" if baseline.get('reference') else ""
+    return [f"- timing baseline: **not comparable with this campaign's v{version} pages** "
+            f"({'; '.join(below)}; the frozen v{version} settings are priming {baseline['prime_ms']} ms "
+            f"and {baseline['reps']} reps{reference}). Too little priming reads a few percent fast, so "
+            f"compare these cells only with runs recorded the same way"
+            + (f"; a verdict here also needs a ratio beyond {ratio:.2f}×" if ratio and ratio > 1 else "")]
+
+
+def harness_env_line(manifest):
+    """The harness variables the recorder passed, as the manifest's `harness_env` records them."""
+    env = manifest.get('harness_env')
+    if not env:
+        return []
+    return ["- harness environment: " + ", ".join(
+        f"`{name}={value}`" if value is not None else f"`{name}` unset" for name, value in env.items())]
+
+
 def render(manifest, suite, rows, run_dir):
     d = descriptor.current()
+    baseline = d.timing_baseline
+    below = below_timing_baseline(manifest)
+    min_ratio = (baseline.get('min_verdict_ratio') or 1.0) if below else 1.0
     axes = report_axes(rows, manifest['timing_policy'])
     report = d.report
     # A run recorded under historical names printed the labels of its time: `aliases.report`
@@ -409,6 +443,7 @@ def render(manifest, suite, rows, run_dir):
         f"{manifest['timing_policy']['statistic']} of {manifest['timing_policy']['repetitions']} reps, "
         f"priming {manifest['timing_policy']['minimum_untimed_priming_ms']} ms "
         f"(time-based, identical on every row)",
+        *baseline_line(manifest, below, baseline),
         (f"- guards: idle window {manifest['guards']['idle_window_seconds']} s, "
          f"max busy {manifest['guards']['max_busy_percent']}% including SMT siblings, "
          f"{manifest['guards']['attempts']} attempts"
@@ -417,6 +452,7 @@ def render(manifest, suite, rows, run_dir):
          if 'idle_window_seconds' in manifest['guards']
          else "- guards: none, no idle gate applied"),
         f"- command: `{manifest['command']}`",
+        *harness_env_line(manifest),
         f"- raw data: `{run_dir.relative_to(d.root)}/`",
         "",
         "## What was measured",
@@ -510,6 +546,8 @@ def render(manifest, suite, rows, run_dir):
             'row is under 20 us so 4T/8T pay thread-region start-up). Per-start ratios and every',
             'chronological sample are in the run directory named at the top of this page (`run*.csv`).',
             'These describe the recorded revisions; they are not a regression claim.',
+            *([f'Below the timing baseline (see the header) `·` also means a ratio within {min_ratio:.2f}×.']
+              if report.get('verdicts', True) and min_ratio > 1 else []),
         ]),
         "",
     ]
@@ -571,7 +609,7 @@ def render(manifest, suite, rows, run_dir):
                             forks = best.get(key, {}).get(row_names[0]) or []
                             fork_us = statistics.median(forks) if forks else None
                             if verdicts_on:
-                                verdicts = comparison_verdict(best, within, key, row_names)
+                                verdicts = comparison_verdict(best, within, key, row_names, min_ratio)
                                 for engine in row_names[1:]:
                                     cells.append(verdict_text(
                                         verdicts.get(engine), fork_us, row_label(engine, report), subject))

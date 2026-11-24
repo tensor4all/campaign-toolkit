@@ -277,6 +277,33 @@ def case_label(cell: Cell) -> str:
     return desc().case_label.format(**tokens)
 
 
+def below_timing_baseline(manifest: dict, baseline: dict | None = None,
+                          version: int | None = None) -> list:
+    """Why a run's timing policy falls short of the campaign's frozen baseline, or `[]`.
+
+    The baseline (`timing.baseline` in the descriptor) is the priming and the repetition count the
+    campaign froze for its timing-policy version after calibrating them. A run recorded under that
+    version with less of either is still a valid run, but not one to read against the runs that met
+    them: too little priming reads a few percent fast (colmat-benchmark's 150 ms probe), which is the
+    size of the ratios a page would otherwise call faster or slower. Only runs of the baseline's own
+    version are compared; a run of another version already has a page of its own.
+    """
+    if baseline is None or version is None:
+        d = descriptor.current()
+        baseline = d.timing_baseline if baseline is None else baseline
+        version = (d.get("timing") or {}).get("version") if version is None else version
+    policy = manifest.get("timing_policy") or {}
+    if not baseline or policy.get("version") != version:
+        return []
+    reasons = []
+    prime, reps = policy.get("minimum_untimed_priming_ms"), policy.get("repetitions")
+    if prime is not None and prime < baseline["prime_ms"]:
+        reasons.append(f"priming {prime} ms < {baseline['prime_ms']} ms")
+    if reps is not None and reps < baseline["reps"]:
+        reasons.append(f"{reps} reps < {baseline['reps']}")
+    return reasons
+
+
 def coverage_of(suite: dict, manifest: dict) -> str:
     """How a run relates to the *current* declaration, by content rather than by hash.
 

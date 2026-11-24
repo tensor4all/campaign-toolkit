@@ -166,6 +166,15 @@
           "items": {
             "type": "string"
           }
+        },
+        "recorded_env": {
+          "description": "Environment variables the harness reads that change what it measures (not the vendor's thread budget, which `vendor_env` removes from the measured process). The recorder writes their values, or null when unset, into the manifest's `harness_env` and the page prints them, so a run that depended on one can be reproduced from its manifest.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -339,6 +348,32 @@
         "prime_ms": {
           "type": "integer",
           "minimum": 1
+        },
+        "baseline": {
+          "description": "The campaign's frozen settings for this timing-policy version. A run recorded under the version with less priming or fewer repetitions is not comparable with the runs that met them: its page says so in its header, the index marks its row, and a verdict on its page also needs a ratio beyond `min_verdict_ratio`, because too little priming is a bias of a few percent that a small ratio cannot be told apart from.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prime_ms",
+            "reps"
+          ],
+          "properties": {
+            "prime_ms": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reps": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "min_verdict_ratio": {
+              "type": "number",
+              "minimum": 1
+            },
+            "reference": {
+              "type": "string"
+            }
+          }
         }
       }
     },

@@ -45,7 +45,8 @@ import subprocess
 import sys
 
 from . import descriptor, pin_recorded
-from .campaign import coverage_of, load, page_relative, page_source, run_spec, vendor_engines
+from .campaign import (below_timing_baseline, coverage_of, load, page_relative, page_source, run_spec,
+                       vendor_engines)
 
 
 def git(checkout, *args):
@@ -189,6 +190,7 @@ def collect():
                     date=m["timestamp"][:10], timestamp=m["timestamp"],
                     coverage=coverage_of(suite, m),
                     status=status, behind=distance, stale_after=suite["stale_after"],
+                    below_baseline=below_timing_baseline(m),
                     page=rel, unattributed=source is None, run_dir=mf.parent,
                     sort_key=(m["timestamp"], m["library"]["commit"][:12], upstream.get("commit", "")[:12]),
                 )
@@ -219,6 +221,7 @@ def collect():
             upstream_ref=upstream.get("ref") or "", version=m["library"].get("version"),
             upstream_version=upstream.get("version"), date=m["timestamp"][:10], timestamp=m["timestamp"],
             coverage="suite-removed", status="retired", behind=None, stale_after=None,
+            below_baseline=below_timing_baseline(m),
             page=rel, unattributed=source is None, run_dir=mf.parent, retired=True,
             sort_key=(m["timestamp"], m["library"]["commit"][:12], upstream.get("commit", "")[:12]),
         )
@@ -372,8 +375,25 @@ def _row(r, dual, profile_mark=""):
     page_link = link(r["page"]) if r.get("page") else "(no page)"
     vendor = f"`{r['vendor']}`" if r["vendor"] else "-"
     revision = f"`{revision_of(r)}`" if dual else f"`{r['commit']}`"
+    status = r['status']
+    if r.get('below_baseline'):
+        # Not a currency state, so it does not replace `status`: a page can be current and still
+        # not comparable with the pages that met the frozen timing settings.
+        status += f"; **not comparable with the timing baseline** ({'; '.join(r['below_baseline'])})"
     return (f"| `{r['suite']}` | `{r['profile']}`{profile_mark} | {vendor} | {revision} | "
-            f"{r['version'] or '-'} | {r['date']} | {r['coverage']} | {r['status']} | {page_link} |")
+            f"{r['version'] or '-'} | {r['date']} | {r['coverage']} | {status} | {page_link} |")
+
+
+def baseline_note(rows):
+    """The index's sentence on rows marked below the timing baseline, when there are any."""
+    if not any(r.get('below_baseline') for r in rows if r):
+        return []
+    baseline = descriptor.current().timing_baseline
+    reference = f" ({baseline['reference']})" if baseline.get('reference') else ""
+    return ["A `status` marked **not comparable with the timing baseline** is a page recorded with less",
+            f"priming or fewer repetitions than the campaign's frozen {baseline['prime_ms']} ms /",
+            f"{baseline['reps']} reps{reference}: too little priming reads a few percent fast, so its",
+            "cells are compared only with runs recorded the same way, never with the other pages here."]
 
 
 def _references_lines(references, generated, dual):
@@ -445,6 +465,7 @@ def render(pages, declared, references, generated, resolved=None):
         "the whole spec and the declaration has not moved since, `partial` when it covered a",
         "subset, and `declaration-changed` when the declaration itself changed after the",
         "measurement. A partial or declaration-changed page never displaces a full-coverage one.",
+        *baseline_note([cell["page"] for cell in current]),
     ]
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -488,6 +509,7 @@ def render_history(pages, declared, references, generated, resolved=None):
         out += [f"### {title}", "", TABLE_HEADER.format(revision=revision_label), TABLE_RULE]
         out += [_row(r, dual) for r in sorted(rows, key=lambda r: (r["suite"], r["profile"], r["vendor"] or ""))]
         out.append("")
+    out += baseline_note(history)
     return "\n".join(out).rstrip("\n") + "\n"
 
 

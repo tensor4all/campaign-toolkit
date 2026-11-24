@@ -38,7 +38,7 @@ import statistics
 import sys
 
 from . import charts, descriptor, jsonschema_lite
-from .campaign import load, page_source, record_pages
+from .campaign import below_timing_baseline, load, page_source, record_pages
 
 SCHEMA = 'trend-points.schema.json'
 # What a line is drawn under, besides its engine and thread budget: points that differ in any of
@@ -72,7 +72,14 @@ def instant(timestamp):
 
 
 def timing_policy_of(manifest):
-    return f'v{(manifest.get("timing_policy") or {}).get("version", 1)}'
+    """`v1`, `v2`, or `v2 below baseline (...)` for a run under the campaign's `timing.baseline`.
+
+    The baseline is part of the condition: a run the index marks as not comparable with the
+    baseline's pages must not be joined into their trend line either (campaign-toolkit#88).
+    """
+    policy = f'v{(manifest.get("timing_policy") or {}).get("version", 1)}'
+    below = below_timing_baseline(manifest)
+    return f'{policy} below baseline ({"; ".join(below)})' if below else policy
 
 
 def case_key(row, v2):
