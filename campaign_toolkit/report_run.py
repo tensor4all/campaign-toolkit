@@ -199,24 +199,41 @@ VERDICT_FLOOR = 0.05        # a difference below this is not reported even when 
 DISPATCH_US = 0.02          # below ~20 us/call the multi-thread rows pay thread-region start-up
 
 
+MARGINAL = 0.6  # a verdict whose largest spread is at least this share of its difference is marginal
+
+
 def comparison_verdict(best, within, key, row_names, min_ratio=1.0):
-    """One verdict per other engine: `(direction, ratio)` when the difference beats the band.
+    """One verdict per other engine: `(ratio, band, marginal)` when the difference beats the spread.
 
     The band is the combined between-start spread of the two rows (sqrt of the two relative
     sample SDs) floored at 5%, so a cell is only annotated when the difference is larger than
-    the spread the run itself recorded. `within` holds each row's per-process relative SDs.
+    the spread the run itself recorded. `within` holds each row's per-process sample SDs, in the
+    cell's own unit (the page prints their median as `W`).
 
-    The difference must also exceed each row's printed `±` (its absolute sample SD, in the
-    cell's own unit). That is the sentence the page's spread guide prints: a cell whose `±` is as
-    large as the difference is not evidence. It is checked against the larger of the two printed
-    values, so a reader can verify every `·` it produces from the cell alone. The relative band
-    cannot enforce it: it compares a dimensionless spread with a log-ratio. In
-    colmat-benchmark#121 a 4.46x ratio (|log| 1.49) cleared the 0.78 band that the noisy row's CV
-    produced, while that row's `±` (239.7 ms) was larger than the 237.6 ms difference claimed.
+    The relative band cannot hold a cell to the sentence the page's spread guide prints, "a cell
+    whose `±` is as large as the difference is not evidence": it compares a dimensionless spread
+    with a log-ratio. In colmat-benchmark#121 a 4.46x ratio (|log| 1.49) cleared the 0.78 band
+    that the noisy row's CV produced, while that row's `±` (239.7 ms) was larger than the
+    237.6 ms difference claimed. Three further rules enforce the sentence in the cell's own unit,
+    so a reader can check every one of them from the cell alone:
+
+    - the difference must exceed the *sum* of the two printed `±`: a median ± SD interval that
+      overlaps the other row's is not a difference. The sum is at least the larger of the two, so
+      the earlier "beyond each printed `±`" rule still holds. colmat-benchmark#102 ohtaka small
+      cholesky 2048 64T printed "1.14x faster" for 21.19 ± 2.57 against 24.20 ± 0.45: the 3.01 ms
+      difference beat the larger `±` but not their sum (3.02), and with two process sets the
+      fork's between-start range was 3.63 ms (colmat-benchmark#102 review).
+    - the difference must exceed each row's `W`. A row whose calls inside one process disagree
+      by more than the difference is bimodal or contended, and its process median hides that: the
+      same run's OpenBLAS lu 2048 128T was 783.7 ± 72.4 (W 1071.7) against a 720.9 ms difference.
+      Such a cell gets `'unresolved'`, not a ratio: it is neither a difference nor its absence,
+      and the honest fix is a rerun, not a number.
+    - a verdict that clears every rule but whose largest spread (the `±` sum or either `W`) is at
+      least `MARGINAL` of the difference carries that share, and the page calls it marginal.
 
     `min_ratio` is the campaign's `timing.baseline.min_verdict_ratio` for a run recorded below the
     baseline (`below_timing_baseline`): such a run carries a known bias of a few percent, so a
-    ratio inside it is not called either way.
+    ratio inside it is not called either way (`False`, before the `W` rule is consulted).
     """
     fork = best.get(key, {}).get(row_names[0])
     if not fork or len(fork) < 2:
@@ -234,10 +251,19 @@ def comparison_verdict(best, within, key, row_names, min_ratio=1.0):
         band = max(math.hypot(statistics.stdev(fork) / fork_median,
                               statistics.stdev(other) / other_median), VERDICT_FLOOR)
         ratio = fork_median / other_median
-        spread = max(statistics.stdev(fork), statistics.stdev(other))
-        out[engine] = ((ratio, band) if abs(math.log(ratio)) > band
-                       and abs(other_median - fork_median) > spread
-                       and max(ratio, 1 / ratio) > min_ratio else False)
+        difference = abs(other_median - fork_median)
+        spread = statistics.stdev(fork) + statistics.stdev(other)
+        if (abs(math.log(ratio)) <= band or difference <= spread
+                or max(ratio, 1 / ratio) <= min_ratio):
+            out[engine] = False
+            continue
+        rows_w = [statistics.median(sds) for sds in
+                  (within.get(key, {}).get(row_names[0]), within.get(key, {}).get(engine)) if sds]
+        if rows_w and difference <= max(rows_w):
+            out[engine] = 'unresolved'
+            continue
+        share = max([spread] + rows_w) / difference
+        out[engine] = (ratio, band, share if share >= MARGINAL else None)
     return out
 
 
@@ -264,10 +290,13 @@ def verdict_text(verdict, fork_us, other, subject='fork'):
         return '-'
     if verdict is False:
         return '·'
-    ratio, _ = verdict
+    if verdict == 'unresolved':
+        return f'`?` not evidence vs `{other}`: a row\'s `W` is as large as the difference (rerun)'
+    ratio, _, marginal = verdict
     mark = '🔴' if ratio > 1 else '🔵'
     return (f'{mark} {subject} {max(ratio, 1 / ratio):.2f}× ' + ('slower' if ratio > 1 else 'faster')
-            + f' than `{other}`')
+            + f' than `{other}`'
+            + (f' (marginal: spread {marginal:.2f} of the difference)' if marginal else ''))
 
 
 def spread_guide_text(best, within):
@@ -503,11 +532,13 @@ def render(manifest, suite, rows, run_dir):
             'between-start variation can exceed the difference being compared.',
             *( [] if not report.get('verdicts', True) else [
                 'The `vs` columns mark only differences larger than the spread this run recorded for those',
-                'two rows (combined between-start SD, floored at 5%) and larger than each of the two rows\' `±`,',
-                'always with the measured library as the subject:',
+                'two rows (combined between-start SD, floored at 5%), larger than the sum of the two rows\' `±`',
+                'and larger than each row\'s `W`, always with the measured library as the subject:',
                 '`🔵 <row> X faster than <row>` / `🔴 <row> X slower than <row>` '
                 '(the subject is the first column of the table, the compared row is named in',
-                'the cell, not only in the column header), `·` inside the band or within a row\'s `±`, `-` that row is not',
+                'the cell, not only in the column header), `·` inside the band or within the rows\' `±`, `?` a row\'s',
+                '`W` is as large as the difference (not evidence either way; rerun the cell), `(marginal: …)` a',
+                f'verdict whose largest spread is at least {MARGINAL:.0%} of its difference, `-` that row is not',
                 'measured in this arm. `notes` carries the cell warnings (`*` a declared row has no measurement,',
             ]),
 
