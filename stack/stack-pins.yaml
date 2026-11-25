@@ -80,8 +80,8 @@ libraries:
     crate: tenferro-runtime
     version: null
     tag: null
-    commit: ce9125d0cff4ee40841120759b5df45252c27f22
-    note: "tenferro-rs main at the 0.12.0 tree (version 0.12.0 is not published: crates.io tenferro-runtime stops at 0.11.0 and 35bc49d5 says nothing is tagged). 0.12 removed the vendor BLAS/LAPACK CPU providers (#2608) and replaced the per-receiver extension traits with the one call grammar (#2552); tenferro-benchmark#490 migrates the harness. tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
+    commit: 1ba9f33521691170c763dfce9b6c9bb56ca523c2
+    note: "tenferro-rs main at the 0.12.0 tree (version 0.12.0 is not published: crates.io tenferro-runtime stops at 0.11.0 and 35bc49d5 says nothing is tagged). 0.12 removed the vendor BLAS/LAPACK CPU providers (#2608) and replaced the per-receiver extension traits with the one call grammar (#2552); tenferro-benchmark#490 migrates the harness. 1ba9f335 (tenferro-rs#2721, 2026-11-23) adds EagerSession::{op}_into destination reuse (#2704) and in-place strided CUDA reads (#2701), which tenferro-benchmark#509 measures. tenferro-runtime is the crate tensor4all-rs imports as `tenferro`"
   tensor4all-rs:
     repo: https://github.com/tensor4all/tensor4all-rs
     crate: tensor4all-core
@@ -133,9 +133,11 @@ repositories:
         file: pins/tenferro-rs.rev
         library: tenferro
         field: commit
-        # The 2026-11-17 A100 routine set published at ce9125d0
-        # (tenferro-benchmark#491), so the hold is dropped and the pin moves
-        # with that publication.
+        # The 2026-11-25 A100 publication of reuse_contraction and the linalg
+        # public-API latency/throughput suites was measured at 1ba9f335
+        # (tenferro-benchmark#509, A100 80GB PCIe on primerose), so the pin moves
+        # with that publication. The rest of the routine set was last measured at
+        # ce9125d0 (tenferro-benchmark#491).
     run_dirs: [data/results/*/*/*/*]
   - name: tensor4all-benchmark
     consumes:
