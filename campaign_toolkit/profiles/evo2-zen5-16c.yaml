@@ -13,24 +13,34 @@ description: >-
   AMD Ryzen AI MAX+ 395 (Strix Halo), 16 physical / 32 logical cores, SMT on.
   L3 is 64 MiB in two 32 MiB instances: cpus 0-7 and their siblings 16-23 share
   one, cpus 8-15 and their siblings 24-31 share the other, so a thread set must
-  be stated together with the domain it sits in.
+  be stated together with the domain it sits in. 1 socket, 1 NUMA node (0-31).
+  The cores are uniform: `amd_pstate_highest_perf` is 166 on every core, where
+  evo (zen5-cpu) read 196 on cpus 0-3 and 124 on its Zen5c compact cores 4-11.
+  This profile replaces zen5-cpu for new measurements; zen5-cpu stays as the
+  historical machine, because its published rows were measured entirely on the
+  compact cores (colmat-benchmark#130).
 cpu: AMD Ryzen AI MAX+ 395
 logical_cpus: 32
 l3: "0-7,16-23: 32 MiB shared; 8-15,24-31: 32 MiB shared"
 # SMT siblings of CPU n are n+16 (`lscpu -e`, `thread_siblings_list` for cpu 0 is
 # `0,16`); the idle gate and the thread rows below derive from this.
 smt: {threads_per_core: 2, sibling_offset: 16}
-# One logical CPU per physical core is measured, so SMT never inflates a row, and the
-# observer (whatever else runs, e.g. the agent that drives the run) stays on the other
-# L3 domain, never on an SMT sibling of a measured core.
+# One logical CPU per physical core is measured, so SMT never inflates a row. The 1T, 4T
+# and 8T rows stay inside the 0-7,16-23 L3 domain. The observer (whatever else runs, e.g.
+# the agent that drives the run) is every CPU that is neither measured nor an SMT sibling
+# of a measured core; at 8T that is exactly the other domain.
 #
-# 16 is deliberately absent. 16T means one thread per physical core here, which is
-# exactly cpus 0-15, whose SMT siblings are all 16 remaining cpus: every cpus that is
-# not measured is a sibling of a measured core, so no observer CPU is left and the
-# recorder refuses the row rather than contending with a measured core. 16T needs its
-# monitoring condition decided first (SMT off and all 16 cores measured, or an 8-core
-# SMT-on row that is not comparable with these three).
+# 16T is one thread per physical core, cpus 0-15, which is how the ohtaka nodes are used,
+# so it spans both L3 domains. Their siblings are all 16 remaining CPUs, so no CPU is left
+# for an observer: the empty observer is deliberate, as zen2-cpu's 64T row. The recorder
+# treats such a row as unobserved (a recorded caveat, not a refusal) only when the measured
+# CPUs cover every online CPU, i.e. with SMT off (siblings 16-31 offline). With SMT on, it
+# refuses to record the 16T row, because the recorder and the driving agent would have to
+# share the measured cores' siblings. Declaring the row here does not settle that; the run
+# that records it must take SMT off first, and its cells are compared with the 1/4/8T rows
+# only after that choice is stated on the page.
 thread_rows:
   - {threads: 1, measured: "0", observer: "1-15,17-31"}
   - {threads: 4, measured: "0-3", observer: "4-15,20-31"}
   - {threads: 8, measured: "0-7", observer: "8-15,24-31"}
+  - {threads: 16, measured: "0-15", observer: ""}

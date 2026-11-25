@@ -1,0 +1,25 @@
+# A hardware profile: a machine (or a well-defined container on one) whose cells
+# are only comparable with each other. See zen5-cpu.yaml for what a profile is.
+# A secondary measurement host of the colmat campaign, measured after evo2-zen5-16c and
+# before the ohtaka nodes (colmat-benchmark#136). It is not a primary target, so it carries
+# only the rows the campaign needs from it.
+role: measurement
+name: minisforum-p-core
+description: >-
+  Intel Core i9-13900HX (Raptor Lake, P+E hybrid), 24 logical CPUs, SMT off.
+  CPUs 0-7 are the 8 P-cores (cpuinfo_max_freq 2200000) and CPUs 8-23 are the
+  16 E-cores (cpuinfo_max_freq 1600000); `cpufreq/cpuinfo_max_freq` is the test
+  that tells them apart. Only P-cores are measured: a thread set that spills
+  onto an E-core mixes core types and is not comparable with evo2-zen5-16c or
+  the Xeon profiles. Measured inside the Docker bench image on the host, so the
+  CPU sets below are the container's view of the host's CPUs.
+cpu: Intel Core i9-13900HX
+logical_cpus: 24
+# SMT is off, so every CPU is its own core (the xeon9242-cpu convention: offset = logical_cpus).
+smt: {threads_per_core: 1, sibling_offset: 24}
+# One CPU per P-core is measured, never an E-core: 1T is cpu 0, 8T is all eight P-cores.
+# The observer is kept on the E-cores 8-23, so it never runs on a measured P-core. There is
+# no 16T or 24T row, because either would put E-cores in the measured set.
+thread_rows:
+  - {threads: 1, measured: "0", observer: "8-23"}
+  - {threads: 8, measured: "0-7", observer: "8-23"}
