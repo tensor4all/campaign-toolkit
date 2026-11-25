@@ -19,7 +19,7 @@
 # `campaign_toolkit/stack/stack-pins.yaml` is the packaged copy that an installed toolkit
 # reads; a test fails if the two differ. Edit this one and copy it over.
 #
-# State: colmat-rs main (untagged, the 2026-11-17 pre-optimization baseline), the releases of
+# State: colmat-rs main (untagged, the 2026-11-25 merge of #296, t4a-private-gemm-x86 0.1.30), the releases of
 # 2026-10-30, tenferro-rs main (untagged, after v0.8.1), tensor4all-rs main, whose own git
 # dependency stays on tenferro v0.8.0, and tcontract-rs main (untagged, at the zqcbench harness
 # merge, which is in no release). Every declared tag and crates.io source commit is checked with
@@ -33,8 +33,8 @@ libraries:
     crate: colmat
     version: null
     tag: null
-    commit: 93da62172a96260ae3d5ed7481690f440f58d904
-    note: "colmat-rs main at the 2026-11-17 head (merge of #218): the pre-optimization baseline, which carries the post-0.34.0 correctness and perf merges #197-#220 that are in no release yet. No `colmat` git tag exists; the published 0.34.0 source is e1c83482 (crates.io .cargo_vcs_info.json) if the released source is wanted instead. The previous library entry was `t4a-faer` 0.28.0 (325e482), the crate name before the 2026-11-12 rename."
+    commit: 81560db94498478e8dd65153739e208391e434b6
+    note: "colmat-rs main at the merge of #296 (t4a-private-gemm-x86 0.1.28 -> 0.1.30, `gemm_with_stack` in the tree; the f64 SYRK the crate carries is not wired in, #281): the target of the twelve-family campaign (colmat-benchmark#129), first measured on evo2. #296 recorded 112 FNV-1a result fingerprints (matmul, llt, partial_piv_lu, qr, svd, self_adjoint_eigen; shapes up to 1000^3; sequential and on a 4-team) with NO DIFF between 0.1.28 and 0.1.30 and an identical same-version control; the only path that could differ is the packed AVX2 driver, which does not engage on AMD Zen5 (evo2) or on the AVX-512 ohtaka nodes. 81560db9 also carries the colmat-rs merges after 93da6217 (e.g. the LU one-panel look-ahead, #239), so a page at this revision is not the 93da6217 baseline. No `colmat` git tag exists. The previous entry was 93da6217 (merge of #218, the 2026-11-17 pre-optimization baseline), at which the zen5-cpu, ohtaka-cpu, ohtaka-fat and keyaki-64 pages were measured."
   faer-upstream:
     repo: https://codeberg.org/sarah-quinones/faer
     crate: faer
@@ -104,8 +104,9 @@ repositories:
         file: pins/colmat.rev
         library: colmat
         field: commit
-        # The 2026-11-17 baseline publication records the daily suite on both vendor arms and the
-        # large suite on MKL at 93da6217 (colmat-rs main), so the pin follows the measured revision.
+        # The twelve-family campaign records colmat-kernels and colmat-kernels-large on evo2 at
+        # 81560db9 (one run per vendor arm), and the pin moves with that recording; the earlier
+        # pages stay at 93da6217, the revision they were measured at.
         # The file was `pins/t4a-faer.rev` until colmat-benchmark#113 named it after the library.
       - {kind: rev-file, file: pins/upstream-faer.rev, library: faer-upstream, field: tag}
     run_dirs: [data/results/*/*/*]
