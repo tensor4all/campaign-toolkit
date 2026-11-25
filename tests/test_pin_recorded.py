@@ -170,9 +170,9 @@ class MeasuredHoldTest(unittest.TestCase):
         held = {u["file"]: u["measured"] for r in stack["repositories"] for u in r["consumes"]
                 if "measured" in u}
         # No hold at all: the four v2 campaigns (tcbench, per-shape, qcbench, zqcbench) were
-        # recorded at 807183f on epyc-9575f on 2026-11-17, and colmat-benchmark's baseline
-        # publication recorded its arms at 93da6217 on 2026-11-18, so every pin now follows the
-        # revision its pages were measured at.
+        # recorded at 807183f on epyc-9575f on 2026-11-17, and colmat-benchmark's pin moves to
+        # 81560db9 in the PR that records it there (evo2, colmat-benchmark#129); that repository
+        # pins this toolkit by revision, so its CI checks the old stack until that PR re-pins it.
         self.assertEqual(held, {})
 
 
