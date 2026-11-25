@@ -15,7 +15,7 @@ import sys
 
 from . import descriptor, jsonschema_lite
 from .campaign import (canonical_engines, engines_for_vendor, find_suite, load, populations,
-                       same_populations, vendor_engines, vendor_of_engines)
+                       same_populations, threads_for, vendor_engines, vendor_of_engines)
 
 
 def known_profiles():
@@ -114,7 +114,7 @@ def check_declaration(manifest, suite, spec, errors):
     # profile -- but for this vendor arm it may only be a subset of what the suite
     # declares, and the manifest has to say whether it covered the declaration.
     for t in manifest["threads"]["counts"]:
-        if t not in spec["threads"]:
+        if t not in threads_for(suite, manifest["target_profile"]):
             errors.append(f"threads.counts contains {t}, which the suite does not declare")
         if str(t) not in manifest["threads"]["cpu_sets"]:
             errors.append(f"threads.cpu_sets is missing an entry for {t}T")

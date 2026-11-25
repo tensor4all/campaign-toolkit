@@ -73,6 +73,17 @@ def run_spec(suite: dict) -> dict:
     return suite["runs"][0]
 
 
+def threads_for(suite: dict, profile: "str | None") -> list:
+    """The thread budgets this suite declares for `profile`.
+
+    `threads` is the grid every profile measures; `profile_threads` replaces it for a profile it
+    names, so a row only one machine has (evo2's 16T, one thread per physical core) is declared
+    for that machine without moving the rows the other profiles publish.
+    """
+    spec = run_spec(suite)
+    return list(spec.get("profile_threads", {}).get(profile, spec["threads"]))
+
+
 def populations(suite: dict, vendor: "str | None" = None) -> list:
     """The declared populations with their family groups expanded.
 
@@ -179,10 +190,16 @@ def check_cpu_sets(suite: dict) -> None:
     """
     spec = run_spec(suite)
     threads, sets = spec.get("threads", []), spec.get("cpu_sets", [])
+    scoped = spec.get("profile_threads", {})
     if isinstance(sets, dict):
         for profile, listed in sets.items():
-            _check_pairs(threads, listed, f" for {profile}")
+            _check_pairs(scoped.get(profile, threads), listed, f" for {profile}")
     else:
+        if scoped:
+            # One list is paired with `threads` by position; a profile's own budgets have no
+            # positions in it, so the list would pin them to some other row's CPUs.
+            raise SystemExit(f"ERROR: profile_threads names {sorted(scoped)}, but cpu_sets is one list "
+                             f"paired with `threads`; write cpu_sets as a mapping from profile to list")
         _check_pairs(threads, sets, "")
 
 
@@ -206,7 +223,7 @@ def cpu_sets_for(suite: dict, profile: dict, threads) -> tuple:
     if profile.get("pinned") is False:
         return {str(t): UNPINNED for t in threads}, f"{profile['name']} is unpinned (pinned: false)"
     spec = run_spec(suite)
-    declared, sets = list(spec["threads"]), spec.get("cpu_sets", [])
+    declared, sets = threads_for(suite, profile["name"]), spec.get("cpu_sets", [])
     if isinstance(sets, dict) and profile["name"] in sets:
         listed = sets[profile["name"]]
         return ({str(t): listed[declared.index(t)] for t in threads},
@@ -315,6 +332,7 @@ def coverage_of(suite: dict, manifest: dict) -> str:
     they cannot disagree about which pages are full.
     """
     spec = run_spec(suite)
+    declared_threads = threads_for(suite, manifest.get("target_profile"))
     rs = manifest.get("run_spec", {})
     arm = vendor_of_engines(rs.get("engines", []))
     want = populations(suite, arm)
@@ -326,13 +344,13 @@ def coverage_of(suite: dict, manifest: dict) -> str:
     recorded = canonical_engines(rs.get("engines", []))
     declared_engines = canonical_engines(engines_for_vendor(suite, arm))
     if not (subset
-            and set(manifest["threads"]["counts"]) <= set(spec["threads"])
+            and set(manifest["threads"]["counts"]) <= set(declared_threads)
             and set(rs.get("dtypes", [])) <= set(spec["dtypes"])
             and set(rs.get("order", [])) <= set(spec.get("order", []))
             and set(recorded) <= set(declared_engines)):
         return "declaration-changed"
     full = (same_populations(got, want)
-            and manifest["threads"]["counts"] == spec["threads"]
+            and manifest["threads"]["counts"] == declared_threads
             and rs.get("dtypes") == spec["dtypes"]
             and rs.get("order", []) == spec.get("order", [])
             and recorded == declared_engines)

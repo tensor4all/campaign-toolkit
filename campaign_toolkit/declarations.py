@@ -75,6 +75,34 @@ def check_aliases(d, suite_ids) -> list:
     return problems
 
 
+def check_profile_threads(path, suite, named, d) -> list:
+    """A profile-scoped thread grid names a profile the suite lists, and every budget in it has CPUs.
+
+    The budgets of a profile `profile_threads` names are pinned by that profile's `cpu_sets` entry
+    (checked by position in `check_cpu_sets`) or else by the profile's own `thread_rows`; a budget
+    neither declares would only fail at record time, after the build.
+    """
+    problems = []
+    spec = suite["runs"][0]
+    sets = spec["cpu_sets"]
+    by_name = {p["name"]: p for p in d.profiles()}
+    for profile, threads in spec.get("profile_threads", {}).items():
+        if profile not in named:
+            problems.append(f"{path}: profile_threads names {profile!r}, which the suite does not list")
+            continue
+        if isinstance(sets, dict) and profile in sets:
+            continue
+        declared = by_name.get(profile, {})
+        if declared.get("pinned") is False:
+            continue
+        rows = {r["threads"] for r in declared.get("thread_rows", [])}
+        missing = [t for t in threads if t not in rows]
+        if missing:
+            problems.append(f"{path}: profile_threads gives {profile!r} the budgets {threads}, but "
+                            f"neither cpu_sets nor that profile's thread_rows declare CPUs for {missing}")
+    return problems
+
+
 def check(root, out=None) -> list:
     out = out or sys.stdout
     d = descriptor.set_root(root)
@@ -145,6 +173,7 @@ def check(root, out=None) -> list:
             problems.append(f"{path}: cpu_sets is one list for the profiles {named}; name the profile "
                             f"it was written for (`cpu_sets: {{{named[0]}: {sets}}}`), and the others "
                             f"take their own thread_rows")
+        problems += check_profile_threads(path, suite, named, d)
         try:
             check_cpu_sets(suite)
         except SystemExit as exc:

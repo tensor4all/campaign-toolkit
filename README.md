@@ -87,6 +87,26 @@ fails a suite whose single list serves more than one profile, and names the mapp
 instead: the list goes under the profile it was written for, and the CPUs it records there do
 not change.
 
+`threads` is the grid every listed profile measures. A row only one machine has - a
+whole-machine budget such as evo2's 16T, one thread per physical core - goes in
+`profile_threads`, which replaces `threads` for the profile it names and leaves every other
+profile's rows where they were:
+
+```yaml
+runs:
+  - threads: [1, 4, 8]
+    profile_threads:
+      evo2-zen5-16c: [1, 4, 8, 16]     # evo2's thread_rows pin 0 / 0-3 / 0-7 / 0-15
+    cpu_sets:
+      zen5-cpu: ["4", "4-7", "4-11"]   # zen5-cpu still measures 1/4/8T here
+```
+
+A named profile's budgets are pinned by its own `cpu_sets` entry (paired by position with its
+`profile_threads` list) or else by its `thread_rows`; `cpu_sets` must then be a mapping, and
+`declarations` fails a budget that neither declares. `record_run` measures the profile's own
+grid by default, and `validate_run` and the index judge a run's coverage against it, so an
+earlier run without the new row stays as a `partial` run rather than being displaced.
+
 ### Before recording on a new host
 
 Three things the first `zen2-cpu` smoke (tensor4all-meta#76, 3.3) had to learn:

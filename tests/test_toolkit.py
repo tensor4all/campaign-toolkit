@@ -1501,7 +1501,7 @@ class CpuSetsTest(unittest.TestCase):
             with self.assertRaises(jsonschema_lite.ValidationError):
                 jsonschema_lite.validate(bad, cpu_sets)
 
-    def declare(self, cpu_sets, profiles):
+    def declare(self, cpu_sets, profiles, profile_threads=None):
         tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         root = tmp / "campaign"
@@ -1512,6 +1512,8 @@ class CpuSetsTest(unittest.TestCase):
             suite = yaml.safe_load(path.read_text())
             suite["required_profiles"], suite["optional_profiles"] = [], list(profiles)
             suite["runs"][0]["cpu_sets"] = cpu_sets
+            if profile_threads is not None:
+                suite["runs"][0]["profile_threads"] = profile_threads
             path.write_text(yaml.safe_dump(suite, sort_keys=False))
         out = io.StringIO()
         with mock.patch.dict(os.environ):
@@ -1524,6 +1526,82 @@ class CpuSetsTest(unittest.TestCase):
         self.assertTrue(problems and all("name the profile" in p for p in problems), problems)
         self.assertEqual(self.declare({"fixture-cpu": ["0"]}, ["fixture-cpu", "zen2-cpu"]), [])
         problems = self.declare({"zen5-cpu": ["0"]}, ["fixture-cpu", "zen2-cpu"])
+        self.assertTrue(problems and all("does not list" in p for p in problems), problems)
+
+    # colmat-benchmark#137: evo2 measures 16T (one thread per physical core, cpus 0-15) beside the
+    # 1/4/8T grid that zen5-cpu publishes, and zen5-cpu's rows must not move.
+    def scoped(self, cpu_sets=None):
+        suite = self.suite([1, 4, 8], cpu_sets or {"zen5-cpu": ["4", "4-7", "4-11"]},
+                           ("zen5-cpu", "evo2-zen5-16c"))
+        suite["runs"][0]["profile_threads"] = {"evo2-zen5-16c": [1, 4, 8, 16]}
+        return suite
+
+    def test_profile_threads_adds_a_row_for_one_profile_only(self):
+        suite = self.scoped()
+        evo2, zen5 = descriptor.shared_profile("evo2-zen5-16c"), descriptor.shared_profile("zen5-cpu")
+        self.assertEqual(campaign.threads_for(suite, "evo2-zen5-16c"), [1, 4, 8, 16])
+        self.assertEqual(campaign.threads_for(suite, "zen5-cpu"), [1, 4, 8])
+        self.assertEqual(campaign.threads_for(suite, None), [1, 4, 8])
+        got, source = campaign.cpu_sets_for(suite, evo2, [1, 4, 8, 16])
+        self.assertEqual(got, {"1": "0", "4": "0-3", "8": "0-7", "16": "0-15"})
+        self.assertEqual(source, "the thread_rows of evo2-zen5-16c")
+        got, _ = campaign.cpu_sets_for(suite, zen5, [1, 4, 8])
+        self.assertEqual(got, {"1": "4", "4": "4-7", "8": "4-11"})
+        campaign.check_cpu_sets(suite)
+
+    def test_a_profile_threads_entry_named_in_cpu_sets_pairs_with_its_own_list(self):
+        suite = self.scoped({"zen5-cpu": ["4", "4-7", "4-11"],
+                             "evo2-zen5-16c": ["0", "0-3", "0-7", "0-15"]})
+        campaign.check_cpu_sets(suite)
+        got, source = campaign.cpu_sets_for(suite, descriptor.shared_profile("evo2-zen5-16c"), [16])
+        self.assertEqual((got, source), ({"16": "0-15"}, "the suite's cpu_sets for evo2-zen5-16c"))
+        # a list paired with the shared 1/4/8 grid is refused for the profile's four budgets
+        with self.assertRaises(SystemExit):
+            campaign.check_cpu_sets(self.scoped({"evo2-zen5-16c": ["0", "0-3", "0-7"]}))
+
+    def test_profile_threads_refuses_one_shared_cpu_list(self):
+        with self.assertRaises(SystemExit) as caught:
+            campaign.check_cpu_sets(self.scoped(["4", "4-7", "4-11"]))
+        self.assertIn("mapping", str(caught.exception))
+
+    def test_coverage_is_judged_against_the_profiles_own_grid(self):
+        suite = self.scoped()
+        suite["runs"][0].update(dtypes=["f64"], engines=["e"])
+
+        def manifest(profile, counts):
+            return {"target_profile": profile, "threads": {"counts": counts},
+                    "run_spec": {"populations": [{"regime": "r"}], "dtypes": ["f64"], "engines": ["e"]}}
+
+        with mock.patch.object(campaign, "vendor_of_engines", return_value=None), \
+                mock.patch.object(campaign, "populations", return_value=[{"regime": "r"}]), \
+                mock.patch.object(campaign, "population_covers", return_value=True), \
+                mock.patch.object(campaign, "same_populations", return_value=True), \
+                mock.patch.object(campaign, "engines_for_vendor", return_value=["e"]), \
+                mock.patch.object(campaign, "canonical_engines", side_effect=list):
+            self.assertEqual(campaign.coverage_of(suite, manifest("zen5-cpu", [1, 4, 8])), "full")
+            self.assertEqual(campaign.coverage_of(suite, manifest("evo2-zen5-16c", [1, 4, 8, 16])), "full")
+            # the 1/4/8T arms recorded before the row was declared stay, as a partial run
+            self.assertEqual(campaign.coverage_of(suite, manifest("evo2-zen5-16c", [1, 4, 8])), "partial")
+            self.assertEqual(campaign.coverage_of(suite, manifest("evo2-zen5-16c", [16])), "partial")
+            # zen5-cpu does not gain the row
+            self.assertEqual(campaign.coverage_of(suite, manifest("zen5-cpu", [16])), "declaration-changed")
+
+    def test_the_suite_schema_takes_profile_threads_as_a_mapping_of_budgets(self):
+        import json
+        schema = json.loads((TOOLKIT / "campaign_toolkit/schemas/benchmark-suite.schema.json").read_text())
+        field = schema["properties"]["runs"]["items"]["properties"]["profile_threads"]
+        jsonschema_lite.validate({"evo2-zen5-16c": [1, 4, 8, 16]}, field)
+        for bad in ({}, {"evo2-zen5-16c": []}, {"evo2-zen5-16c": [0]}, {"evo2-zen5-16c": 16}, [16]):
+            with self.assertRaises(jsonschema_lite.ValidationError):
+                jsonschema_lite.validate(bad, field)
+
+    def test_declarations_check_profile_threads(self):
+        listed = {"fixture-cpu": ["0"]}
+        self.assertEqual(self.declare(listed, ["fixture-cpu", "zen2-cpu"],
+                                      {"zen2-cpu": [1, 4, 8, 64]}), [])
+        problems = self.declare(listed, ["fixture-cpu", "zen2-cpu"], {"zen2-cpu": [1, 16]})
+        self.assertTrue(problems and all("declare CPUs for [16]" in p for p in problems), problems)
+        problems = self.declare(listed, ["fixture-cpu", "zen2-cpu"], {"zen5-cpu": [1]})
         self.assertTrue(problems and all("does not list" in p for p in problems), problems)
 
 
