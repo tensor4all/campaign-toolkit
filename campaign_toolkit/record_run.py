@@ -41,7 +41,7 @@ import yaml
 from . import descriptor, hostinfo, observer_audit
 from . import link_preflight
 from .campaign import (canonical_engines, check_cpu_sets, cpu_sets_for, engines_for_vendor, populations,
-                       provider_of, same_populations, vendor_engines)
+                       provider_of, same_populations, threads_for, vendor_engines)
 
 
 def sh(cmd, **kw):
@@ -934,7 +934,9 @@ def main(argv=None, root=None):
             sys.exit(f"ERROR: {sorted(unknown)} are not declared by this suite")
         covered = [dict(p, n=[s for s in p["n"] if s in wanted]) for p in covered]
         covered = [p for p in covered if p["n"]]
-    threads = [int(t) for t in args.threads.split(",")] if args.threads else spec["threads"]
+    # The profile's own budgets when the suite scopes some to it (`profile_threads`).
+    declared_threads = threads_for(suite, args.profile)
+    threads = [int(t) for t in args.threads.split(",")] if args.threads else declared_threads
     dtypes = args.dtypes.split(",") if args.dtypes else spec["dtypes"]
     # A declared case axis -- the memory order, in the campaigns that declare one. It is part
     # of a cell's identity, so it is recorded and it is part of the coverage comparison.
@@ -1293,7 +1295,7 @@ def main(argv=None, root=None):
             **({"order": order} if "order" in spec else {}),
             "engines": engines,
             "aa": args.aa,
-            "covers_declared_suite": (threads == spec["threads"]
+            "covers_declared_suite": (threads == declared_threads
                                       and dtypes == spec["dtypes"]
                                       and order == spec.get("order", [])
                                       and covers_declared_engines(engines, suite, arm)

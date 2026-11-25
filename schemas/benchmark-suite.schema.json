@@ -101,6 +101,16 @@
               "minimum": 1
             }
           },
+          "profile_threads": {
+            "description": "Optional per-profile thread budgets: a mapping from a profile the suite lists to the thread budgets measured on that profile, in place of `threads`. A profile not named measures `threads`. A named profile's budgets are pinned by its own `cpu_sets` entry (by position in this list) or, when `cpu_sets` names no list for it, by the profile's `thread_rows`, so a row only one machine has (a whole-machine budget) is declared without changing the rows of the other profiles. Requires `cpu_sets` to be a mapping.",
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "integer", "minimum": 1}
+            }
+          },
           "cpu_sets": {
             "description": "The measured CPUs for each thread count, in the order of `threads`. Either one list that every profile uses, or a mapping from a profile name to its list. A profile the mapping does not name is pinned by its own `thread_rows`.",
             "type": ["array", "object"],
